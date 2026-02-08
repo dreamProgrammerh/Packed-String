@@ -54,11 +54,6 @@ typedef struct packed_string {
 #define PACKED_FLAG_STARTS_WITH_DIGIT   (1u << 6)   // Bit 6: 1=first char is 0-9
 #define PACKED_FLAG_CONTAINS_SPECIAL    (1u << 5)   // Bit 5: 1=contains '_' or '$'
 
-// Metadata mask (bits 0-4: length, bits 5-7: flags)
-#define PACKED_METADATA_MASK    0xFFu
-#define PACKED_LENGTH_MASK      0x1Fu
-#define PACKED_FLAGS_MASK       0xE0u
-
 // ============================================================================
 // CORE OPERATIONS
 // ============================================================================
@@ -70,7 +65,7 @@ typedef struct packed_string {
  * @return String length
  */
 static inline u8 ps_length(const PackedString ps) {
-    return ps.hi >> 56 & PACKED_LENGTH_MASK;
+    return ps.hi >> 56 & 0x1F;
 }
 
 /**
@@ -80,7 +75,7 @@ static inline u8 ps_length(const PackedString ps) {
  * @return Flags byte (bits 5-7 are valid)
  */
 static inline u8 ps_flags(const PackedString ps) {
-    return ps.hi >> 56 & PACKED_FLAGS_MASK;
+    return ps.hi >> 61 & 0x07;
 }
 
 /**
@@ -90,7 +85,7 @@ static inline u8 ps_flags(const PackedString ps) {
  * @return true if valid
  */
 static inline bool ps_valid(const PackedString ps) {
-    return (ps.hi >> 56 & PACKED_LENGTH_MASK) <= PACKED_STRING_MAX_LEN;
+    return (ps.hi >> 56 & 0x1F) <= PACKED_STRING_MAX_LEN;
 }
 
 /**
