@@ -374,7 +374,7 @@ bool ps_contains_char(PackedString ps, char c);
 // ============================================================================
 
 /**
- * 32-bit hash of packed string (FNV-1a).
+ * 32-bit hash of packed string (MurmurHash3).
  * 
  * @param ps Packed string
  * @return 32-bit hash value
@@ -382,7 +382,7 @@ bool ps_contains_char(PackedString ps, char c);
 u32 ps_hash32(PackedString ps);
 
 /**
- * 64-bit hash of packed string (FNV-1a).
+ * 64-bit hash of packed string (MurmurHash3).
  * 
  * @param ps Packed string
  * @return 64-bit hash value
