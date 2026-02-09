@@ -253,6 +253,9 @@ char ps_char_at(const PackedString ps, const u8 index) {
 }
 
 char ps_first_char(const PackedString ps) {
+    const u8 length = ps_length(ps);
+    if (length == 0) return '\0';
+
     const u8 sixbit = ps.lo & 0x3F;
     return ps_sixbit_to_char(sixbit);
 }
@@ -401,13 +404,18 @@ bool ps_starts_with(const PackedString ps, const PackedString prefix) {
 
     if (len_prefix > len_ps) return false;
 
-    if (len_prefix <= 10) {
+    if (len_prefix < 11) {
         const u64 mask = (1ULL << (len_prefix * 6)) - 1;
         return (ps.lo & mask) == prefix.lo;
     }
 
     if (ps.lo == prefix.lo) {
-        const u64 mask = (1ULL << ((len_prefix - 10) * 6)) - 1;
+        if (len_prefix == 11) {
+            const u64 mask = 0x3;
+            return (ps.hi & mask) == (prefix.hi & mask);
+        }
+
+        const u64 mask = ((1ULL << ((len_prefix - 11) * 6 + 2)) - 1);
         return (ps.hi & mask) == (prefix.hi & mask);
     }
 
