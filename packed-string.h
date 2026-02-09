@@ -26,15 +26,15 @@ typedef int64_t i64;
  * PackedString - 128-bit compact string storage
  * 
  * Stores up to 20 characters using 6-bit encoding (64-character alphabet).
- * Layout: [120 bits character data][5 bits length][3 bits flags]
+ * Layout: [120 bits character data][3 bits flags][5 bits length]
  *
  * Characters 0-9: in lo[0:59] (bits 0 to 59)
- * Character 10: in lo[60:63] and hi[62:63] (4 bits from lo, 2 bits from hi)
- * Characters 11-19: in hi[2:56] (bits 2 to 56 of hi)
+ * Character 10: in lo[60:63] and hi[0:1] (4 bits from lo, 2 bits from hi)
+ * Characters 11-19: in hi[2:55] (bits 2 to 56 of hi)
  *
- * Metadata in hi[57:63]
- *  * Length hi[57:60]
- *  * Flags hi[61:63]
+ * Metadata in hi[56:63]
+ *  * Flags hi[56:58]
+ *  * Length hi[59:63]
  *
  * Character set: 0-9 a-z A-Z _ $
  * Flags: case_sensitive | starts_with_digit | contains_special
@@ -50,9 +50,9 @@ typedef struct packed_string {
 #define PACKED_STRING_INVALID ((PackedString){.lo = UINT64_MAX, .hi = UINT64_MAX})
 
 // Flag bit positions (in metadata byte)
-#define PACKED_FLAG_CASE_SENSITIVE      (1u << 7)   // Bit 7: 1=preserve case, 0=lowercase
-#define PACKED_FLAG_STARTS_WITH_DIGIT   (1u << 6)   // Bit 6: 1=first char is 0-9
-#define PACKED_FLAG_CONTAINS_SPECIAL    (1u << 5)   // Bit 5: 1=contains '_' or '$'
+#define PACKED_FLAG_CASE_SENSITIVE      (1u << 0)   // Bit 0: 1=preserve case, 0=lowercase
+#define PACKED_FLAG_STARTS_WITH_DIGIT   (1u << 1)   // Bit 1: 1=first char is 0-9
+#define PACKED_FLAG_CONTAINS_SPECIAL    (1u << 2)   // Bit 2: 1=contains '_' or '$'
 
 // ============================================================================
 // CORE OPERATIONS
@@ -65,7 +65,7 @@ typedef struct packed_string {
  * @return String length
  */
 static inline u8 ps_length(const PackedString ps) {
-    return ps.hi >> 56 & 0x1F;
+    return ps.hi >> 59;
 }
 
 /**
@@ -75,7 +75,7 @@ static inline u8 ps_length(const PackedString ps) {
  * @return Flags byte (bits 5-7 are valid)
  */
 static inline u8 ps_flags(const PackedString ps) {
-    return ps.hi >> 61 & 0x07;
+    return (ps.hi >> 56) & 0x7;
 }
 
 /**
@@ -85,7 +85,7 @@ static inline u8 ps_flags(const PackedString ps) {
  * @return true if valid
  */
 static inline bool ps_valid(const PackedString ps) {
-    return (ps.hi >> 56 & 0x1F) <= PACKED_STRING_MAX_LEN;
+    return (ps.hi >> 59) <= PACKED_STRING_MAX_LEN;
 }
 
 /**
@@ -112,9 +112,9 @@ PackedString ps_pack_ex(const char* str, u8 length, u8 flags);
  * 
  * @param ps Packed string to unpack
  * @param buffer Output buffer (must have at least PACKED_STRING_MAX_LEN+1 bytes)
- * @return Pointer to buffer (or NULL if ps is invalid)
+ * @return false if ps is invalid else true (success)
  */
-char* ps_unpack(PackedString ps, char* buffer);
+bool ps_unpack(PackedString ps, char* buffer);
 
 /**
  * Unpack exact length with specified flags (advanced use).
@@ -123,9 +123,9 @@ char* ps_unpack(PackedString ps, char* buffer);
  * @param buffer Output buffer (must have at least PACKED_STRING_MAX_LEN+1 bytes)
  * @param length String length (must be ≤ 20)
  * @param flags Combination of PACKED_FLAG_* constants
- * @return Pointer to buffer (or NULL if ps is invalid or length > 20)
+ * @return false if ps is invalid or length > 20
  */
-char* ps_unpack_ex(PackedString ps, char* buffer, u8 length, u8 flags);
+bool ps_unpack_ex(PackedString ps, char* buffer, u8 length, u8 flags);
 
 // ============================================================================
 // FLAGS CHECK O(1)
@@ -438,9 +438,9 @@ bool ps_validate(PackedString ps);
  * 
  * @param ps Packed string
  * @param buffer Output buffer (33 bytes min)
- * @return Pointer to buffer
+ * @return -1 if (buffer is invalid) else (output length + null)
  */
-char* ps_debug_hex(PackedString ps, char* buffer);
+i32 ps_debug_hex(PackedString ps, char* buffer);
 
 /**
  * Format as binary string (128 chars + null).
@@ -448,9 +448,9 @@ char* ps_debug_hex(PackedString ps, char* buffer);
  * @param ps Packed string
  * @param separated separate each 6 bit chars, and last 8 bit metadata
  * @param buffer Output buffer (129 bytes min)
- * @return Pointer to buffer
+ * @return -1 if (buffer is invalid) else (output length + null)
  */
-char* ps_debug_binary(PackedString ps, bool separated, char* buffer);
+i32 ps_debug_binary(PackedString ps, bool separated, char* buffer);
 
 /**
  * Format packed string info for debugging.
@@ -459,16 +459,34 @@ char* ps_debug_binary(PackedString ps, bool separated, char* buffer);
  * @param buffer Output buffer
  * @return Pointer to buffer
  */
-char* ps_debug_info(PackedString ps, char* buffer);
+i32 ps_debug_info(PackedString ps, char* buffer);
 
 /**
- * Get string representation (thread-local buffer).
- * WARNING: Not thread-safe, buffer reused on next call.
- * 
+ * Visualize encoded bits as string.
+ *
  * @param ps Packed string
- * @return C string representation
+ * @param buffer Output buffer
+ * @return -1 if (buffer is invalid) else (output length + null)
+*/
+i32 ps_visualize_bits(PackedString ps, char* buffer);
+
+/**
+ * Format packed string data as string aka (toString).
+ *
+ * @param ps Packed string
+ * @param buffer Output buffer
+ * @return -1 if (buffer is invalid) else (output length + null)
+*/
+i32 ps_inspect(PackedString ps, char* buffer);
+
+/**
+ * Get c string representation.
+ *
+ * @param ps Packed string
+ * @param buffer Output buffer
+ * @return C string length including null
  */
-const char* ps_to_cstr(PackedString ps);
+i32 ps_to_cstr(PackedString ps, char* buffer);
 
 // ============================================================================
 // COMPILE-TIME HELPERS
@@ -478,7 +496,7 @@ const char* ps_to_cstr(PackedString ps);
  * Compile-time string packing for constants.
  * Example: PackedString str = PS_LITERAL("hello");
  */
-#define PS_LITERAL(str) (ps_pack(str))
+#define PS_LITERAL(str) (ps_pack_ex(str, sizeof(str) - 1, PACKED_FLAG_CASE_SENSITIVE))
 
 /**
  * Compile-time length check.
