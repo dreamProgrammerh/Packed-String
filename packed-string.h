@@ -434,7 +434,7 @@ bool ps_validate(PackedString ps);
 // ============================================================================
 
 /**
- * Format as hex string (33 chars including null).
+ * Format as hex string (32 chars + null).
  * 
  * @param ps Packed string
  * @param buffer Output buffer (33 bytes min)
@@ -444,12 +444,13 @@ char* ps_debug_hex(PackedString ps, char* buffer);
 
 /**
  * Format as binary string (128 chars + null).
- * 
+ *
  * @param ps Packed string
+ * @param separated separate each 6 bit chars, and last 8 bit metadata
  * @param buffer Output buffer (129 bytes min)
  * @return Pointer to buffer
  */
-char* ps_debug_binary(PackedString ps, char* buffer);
+char* ps_debug_binary(PackedString ps, bool separated, char* buffer);
 
 /**
  * Format packed string info for debugging.
