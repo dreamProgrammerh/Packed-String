@@ -60,35 +60,70 @@ static const u8 TO_UPPER_TABLE[64] = {
     62,63
 };
 
+static inline u8 ps_get_mid(const u64 lo, const u64 hi) {
+    return (hi & 0x3) << 4 | lo >> 60 & 0xF;
+}
+
+static inline u8 ps_get_lo(const u64 lo, const u8 n) {
+    return lo >> (n * 6) & 0x3F;
+}
+
+static inline u8 ps_get_hi(const u64 hi, const u8 n) {
+    return hi >> (n * 6 + 2) & 0x3F;   // +2 to skip hi[0:1]
+}
+
+static inline void ps_set_mid(u64 *restrict lo, u64 *restrict hi, const u8 sixbit) {
+    *lo &= ~(0xFULL << 60);             // Clear lo[60:63]
+    *hi &= ~0x3ULL;                     // Clear hi[0:1]
+    *lo |= (u64)(sixbit & 0xF) << 60;   // Set lo[60:63]
+    *hi |= sixbit >> 4 & 0x3;           // Set hi[0:1]
+}
+
+static inline void ps_set_lo(u64* lo, const u8 n, const u8 sixbit) {
+    *lo &= ~(0x3FULL << (n * 6));
+    *lo |= (u64)sixbit << (n * 6);
+}
+
+static inline void ps_set_hi(u64* hi, const u8 n, const u8 sixbit) {
+    const i32 shift = n * 6 + 2; // +2 to skip hi[0:1]
+    *hi &= ~(0x3FULL << shift);
+    *hi |= (u64)sixbit << shift;
+}
+
 static inline u8 ps_get_n_sixbit(const u64 lo, const u64 hi, const u8 n) {
     if (n < 10) {
         return lo >> (n * 6) & 0x3F;
     }
 
     if (n > 10) {
-        const i32 shift = (n - 11) * 6 + 2;  // +2 to skip hi[0:1]
+        const i32 shift = (n - 11) * 6 + 2;
         return hi >> shift & 0x3F;
     }
 
     // n == 10
-    return (lo >> 60 & 0xF) << 2 | hi & 0x3;  // hi[0:1]
+    return (hi & 0x3) << 4 | lo >> 60 & 0xF;
 }
 
-static inline void ps_insert_n_sixbit(u64* lo, u64* hi, const u8 n, const u8 sixbit) {
+static inline void ps_set_n_sixbit(u64 *restrict lo, u64 *restrict hi, const u8 n, const u8 sixbit) {
     if (n < 10) {
-        *lo &= ~(0x3FULL << (n * 6));
-        *lo |= (u64)sixbit << (n * 6);
+        const u8 shift = (n * 6);
+        *lo &= ~(0x3FULL << shift);
+        *lo |= (u64)sixbit << shift;
     } else if (n > 10) {
         // n > 10 (11-19)
-        const i32 shift = (n - 11) * 6 + 2;     // +2 to skip hi[0:1]
+        const u8 shift = (n - 11) * 6 + 2;
         *hi &= ~(0x3FULL << shift);
         *hi |= (u64)sixbit << shift;
     } else {
-        *lo &= ~(0xFULL << 60);           // Clear lo[60:63]
-        *hi &= ~0x3ULL;                   // Clear hi[0:1]
-        *lo |= (u64)(sixbit >> 2) << 60;  // Set lo[60:63]
-        *hi |= sixbit & 0x3;              // Set hi[0:1]
+        *lo &= ~(0xFULL << 60);
+        *hi &= ~0x3ULL;
+        *lo |= (u64)(sixbit & 0xF) << 60;
+        *hi |= sixbit >> 4 & 0x3;
     }
+}
+
+static inline u8 ps_pack_metadata(const u8 length, const u8 flags) {
+    return length << 3 | flags;
 }
 
 static inline u8 ps_extract_metadata(const u64 hi) {
@@ -97,10 +132,6 @@ static inline u8 ps_extract_metadata(const u64 hi) {
 
 static inline void ps_insert_metadata(u64* hi, const u8 metadata) {
     *hi = *hi & 0x00FFFFFFFFFFFFFFULL | (u64)metadata << 56;
-}
-
-static inline u8 ps_pack_metadata(const u8 length, const u8 flags) {
-    return length << 3 | flags;
 }
 
 // Convert 6-bit value to char (internal)
@@ -146,7 +177,7 @@ PackedString ps_pack(const char* str) {
             return PACKED_STRING_INVALID;
         }
 
-        ps_insert_n_sixbit(&lo, &hi, length, sixbit);
+        ps_set_n_sixbit(&lo, &hi, length, sixbit);
         length++;
     }
 
@@ -199,7 +230,7 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
             return PACKED_STRING_INVALID;
         }
 
-        ps_insert_n_sixbit(&lo, &hi, i, sixbit);
+        ps_set_n_sixbit(&lo, &hi, i, sixbit);
     }
 
     // Insert metadata
@@ -427,19 +458,42 @@ bool ps_ends_with(const PackedString ps, const PackedString suffix) {
     const u8 len_suffix = ps_length(suffix);
 
     if (len_suffix > len_ps) return false;
+    if (len_suffix == len_ps) return ps_equal(ps, suffix);
 
+    const u8 start = (len_ps - len_suffix) * 6;
+    const u8 bits   = len_suffix * 6;
 
-    if (len_suffix <= 10) {
-        const u64 mask = (1ULL << (len_suffix * 6)) - 1;
-        return (ps.hi & ~0xffull & mask) == (suffix.hi & ~0xffull & mask);
+    // entirely inside lo
+    if (start + bits <= 64) {
+        const u64 mask = ((1ULL << bits) - 1) << start;
+        return ((ps.lo ^ (suffix.lo << start)) & mask) == 0;
     }
 
-    if (ps.lo == suffix.lo) {
-        const u64 mask = (1ULL << ((len_suffix - 10) * 6)) - 1;
-        return (ps.hi & mask) == (suffix.hi & mask);
+    // entirely inside hi
+    if (start >= 64) {
+        const u32 shift = start - 64;
+        const u64 mask  = (bits == 64) ? ~0ULL : ((1ULL << bits) - 1);
+        return ((ps.hi >> shift) & mask) == (suffix.lo & mask);
     }
 
-    return false;
+    // crosses boundary
+    const u32 lo_bits = 64 - start;
+    const u32 hi_bits = bits - lo_bits;
+
+    const u64 lo_mask = (1ULL << lo_bits) - 1;
+    const u64 hi_mask = (1ULL << hi_bits) - 1;
+
+    const u64 ps_lo = (ps.lo >> start) & lo_mask;
+    const u64 ps_hi = ps.hi & hi_mask;
+
+    const u64 suffix_lo = suffix.lo & lo_mask;
+
+    // Simple bit ternery to avoid branching b ^ ((a ^ b) & -(cmp))
+    const u64 hi_1 = ((suffix.lo >> lo_bits) | (suffix.hi << (64 - lo_bits))) & hi_mask;
+    const u64 hi_2 = suffix.hi & hi_mask;
+    const u64 suffix_hi = hi_2 ^ ((hi_1 ^ hi_2) & -(lo_bits < 64));
+
+    return (ps_lo == suffix_lo) & (ps_hi == suffix_hi);
 }
 
 PackedString ps_substring(const PackedString ps, const u8 start, const u8 length) {
@@ -516,7 +570,7 @@ PackedString ps_concat(const PackedString a, const PackedString b) {
     // Append 'b' character by character (but using sixbit directly)
     for (u8 i = 0; i < len_b; i++) {
         const u8 sixbit = ps_sixbit_at(b, i);
-        ps_insert_n_sixbit(&result.lo, &result.hi, current_pos, sixbit);
+        ps_set_n_sixbit(&result.lo, &result.hi, current_pos, sixbit);
         current_pos++;
     }
 
