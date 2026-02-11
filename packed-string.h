@@ -290,6 +290,26 @@ bool ps_starts_with(PackedString ps, PackedString prefix);
 bool ps_ends_with(PackedString ps, PackedString suffix);
 
 /**
+ * Check if packed string starts with prefix at start.
+ *
+ * @param ps Packed string
+ * @param prefix Prefix to check
+ * @param start Check after start position
+ * @return true if ps starts with prefix
+ */
+bool ps_starts_with_at(PackedString ps, PackedString prefix, u8 start);
+
+/**
+ * Check if packed string ends with suffix from end.
+ *
+ * @param ps Packed string
+ * @param suffix Suffix to check
+ * @param end Check before end position
+ * @return true if ps ends with suffix
+ */
+bool ps_ends_with_at(PackedString ps, PackedString suffix, u8 end);
+
+/**
  * Get substring as new packed string.
  * Returns empty string if start ≥ length.
  * 

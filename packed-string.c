@@ -150,6 +150,48 @@ static inline bool ps_char_valid(const char c) {
     return PS_CHAR_TO_SIXBIT[(u8)c] != 0 || c == '0';  // '0' maps to 0
 }
 
+static inline bool ps_is_at(
+    const u64 lo1, const u64 hi1, const u8 len1,
+    const u64 lo2, const u64 hi2, const u8 len2,
+    const u8 idx
+)
+{
+    if (idx + len2 > len1) return false;
+
+    const u32 start = (u32)idx * 6;
+    const u32 bits  = (u32)len2 * 6;
+
+    // Entirely inside lo
+    if (start + bits <= 64) {
+        const u64 mask = ((1ULL << bits) - 1) << start;
+        return ((lo1 ^ (lo2 << start)) & mask) == 0;
+    }
+
+    // Entirely inside hi
+    if (start >= 64) {
+        const u32 shift = start - 64;
+        const u64 mask  = (bits == 64) ? ~0ULL : ((1ULL << bits) - 1);
+        return ((hi1 >> shift) & mask) == (lo2 & mask);
+    }
+
+    // Cross boundary
+    const u32 lo_bits = 64 - start;
+    const u32 hi_bits = bits - lo_bits;
+
+    const u64 lo_mask = (1ULL << lo_bits) - 1;
+    const u64 hi_mask = (1ULL << hi_bits) - 1;
+
+    const u64 p1_lo = (lo1 >> start) & lo_mask;
+    const u64 p1_hi = hi1 & hi_mask;
+
+    const u64 p2_lo = lo2 & lo_mask;
+    const u64 p2_hi = lo_bits < 64
+        ? ((lo2 >> lo_bits) | (hi2 << (64 - lo_bits))) & hi_mask
+        : (hi2 & hi_mask);
+
+    return (p1_lo == p2_lo) & (p1_hi == p2_hi);
+}
+
 // ============================================================================
 // CORE IMPLEMENTATION
 // ============================================================================
@@ -457,43 +499,38 @@ bool ps_ends_with(const PackedString ps, const PackedString suffix) {
     const u8 len_ps = ps_length(ps);
     const u8 len_suffix = ps_length(suffix);
 
-    if (len_suffix > len_ps) return false;
-    if (len_suffix == len_ps) return ps_equal(ps, suffix);
+    return ps_is_at(
+        ps.lo, ps.hi, len_ps,
+        suffix.lo, suffix.hi, len_suffix,
+        len_ps - len_suffix
+    );
+}
 
-    const u8 start = (len_ps - len_suffix) * 6;
-    const u8 bits   = len_suffix * 6;
 
-    // entirely inside lo
-    if (start + bits <= 64) {
-        const u64 mask = ((1ULL << bits) - 1) << start;
-        return ((ps.lo ^ (suffix.lo << start)) & mask) == 0;
-    }
+bool ps_starts_with_at(const PackedString ps, const PackedString prefix, const u8 start) {
+    const u8 len_ps = ps_length(ps);
+    const u8 len_prefix = ps_length(prefix);
 
-    // entirely inside hi
-    if (start >= 64) {
-        const u32 shift = start - 64;
-        const u64 mask  = (bits == 64) ? ~0ULL : ((1ULL << bits) - 1);
-        return ((ps.hi >> shift) & mask) == (suffix.lo & mask);
-    }
+    if (start + len_prefix > len_ps) return false;
 
-    // crosses boundary
-    const u32 lo_bits = 64 - start;
-    const u32 hi_bits = bits - lo_bits;
+    return ps_is_at(
+        ps.lo, ps.hi, len_ps,
+        prefix.lo, prefix.hi, len_prefix,
+        start
+    );
+}
 
-    const u64 lo_mask = (1ULL << lo_bits) - 1;
-    const u64 hi_mask = (1ULL << hi_bits) - 1;
+bool ps_ends_with_at(const PackedString ps, const PackedString suffix, const u8 end) {
+    const u8 len_ps = ps_length(ps);
+    const u8 len_suffix = ps_length(suffix);
 
-    const u64 ps_lo = (ps.lo >> start) & lo_mask;
-    const u64 ps_hi = ps.hi & hi_mask;
+    if (len_ps - end < len_suffix) return false;
 
-    const u64 suffix_lo = suffix.lo & lo_mask;
-
-    // Simple bit ternery to avoid branching b ^ ((a ^ b) & -(cmp))
-    const u64 hi_1 = ((suffix.lo >> lo_bits) | (suffix.hi << (64 - lo_bits))) & hi_mask;
-    const u64 hi_2 = suffix.hi & hi_mask;
-    const u64 suffix_hi = hi_2 ^ ((hi_1 ^ hi_2) & -(lo_bits < 64));
-
-    return (ps_lo == suffix_lo) & (ps_hi == suffix_hi);
+    return ps_is_at(
+        ps.lo, ps.hi, len_ps,
+        suffix.lo, suffix.hi, len_suffix,
+        len_ps - len_suffix - end
+    );
 }
 
 PackedString ps_substring(const PackedString ps, const u8 start, const u8 length) {
