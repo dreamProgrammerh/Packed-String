@@ -60,6 +60,15 @@ static const u8 TO_UPPER_TABLE[64] = {
     62,63
 };
 
+static inline void ps_shl6(u64 *restrict lo, u64 *restrict hi) {
+    *hi = (*hi << 6) | (*lo >> 58);
+    *lo <<= 6;
+}
+
+static inline void ps_insert6(u64* lo, const u8 v) {
+    *lo |= (u64)v;
+}
+
 static inline u8 ps_get_mid(const u64 lo, const u64 hi) {
     return (hi & 0x3) << 4 | lo >> 60 & 0xF;
 }
@@ -192,6 +201,69 @@ static inline bool ps_is_at(
     return (p1_lo == p2_lo) & (p1_hi == p2_hi);
 }
 
+static inline i8 ps_find(
+    const u64 lo, const u64 hi,
+    const u8 idx, const u8 sixbit
+){
+    switch (idx) {
+        case 0: if ((lo & 0x3F) == sixbit) return 0;
+        case 1: if ((lo >> 6 & 0x3F) == sixbit) return 1;
+        case 2: if ((lo >> 12 & 0x3F) == sixbit) return 2;
+        case 3: if ((lo >> 18 & 0x3F) == sixbit) return 3;
+        case 4: if ((lo >> 24 & 0x3F) == sixbit) return 4;
+        case 5: if ((lo >> 30 & 0x3F) == sixbit) return 5;
+        case 6: if ((lo >> 36 & 0x3F) == sixbit) return 6;
+        case 7: if ((lo >> 42 & 0x3F) == sixbit) return 7;
+        case 8: if ((lo >> 48 & 0x3F) == sixbit) return 8;
+        case 9: if ((lo >> 54 & 0x3F) == sixbit) return 9;
+
+        case 10: if (((hi & 0x3) << 4 | lo >> 60 & 0xF) == sixbit) return 10;
+
+        case 11: if ((hi >> 2 & 0x3F) == sixbit) return 11;
+        case 12: if ((hi >> 8 & 0x3F) == sixbit) return 12;
+        case 13: if ((hi >> 14 & 0x3F) == sixbit) return 13;
+        case 14: if ((hi >> 20 & 0x3F) == sixbit) return 14;
+        case 15: if ((hi >> 26 & 0x3F) == sixbit) return 15;
+        case 16: if ((hi >> 32 & 0x3F) == sixbit) return 16;
+        case 17: if ((hi >> 38 & 0x3F) == sixbit) return 17;
+        case 18: if ((hi >> 44 & 0x3F) == sixbit) return 18;
+        case 19: if ((hi >> 50 & 0x3F) == sixbit) return 19;
+        default: return -1;
+    }
+}
+
+static inline i8 ps_reverse_find(
+    const u64 lo, const u64 hi,
+    const u8 idx, const u8 sixbit
+){
+    switch (idx) {
+        case 19: if ((hi >> 50 & 0x3F) == sixbit) return 19;
+        case 18: if ((hi >> 44 & 0x3F) == sixbit) return 18;
+        case 17: if ((hi >> 38 & 0x3F) == sixbit) return 17;
+        case 16: if ((hi >> 32 & 0x3F) == sixbit) return 16;
+        case 15: if ((hi >> 26 & 0x3F) == sixbit) return 15;
+        case 14: if ((hi >> 20 & 0x3F) == sixbit) return 14;
+        case 13: if ((hi >> 14 & 0x3F) == sixbit) return 13;
+        case 12: if ((hi >> 8 & 0x3F) == sixbit) return 12;
+        case 11: if ((hi >> 2 & 0x3F) == sixbit) return 11;
+
+        case 10: if (((hi & 0x3) << 4 | lo >> 60 & 0xF) == sixbit) return 10;
+
+        case 9: if ((lo >> 54 & 0x3F) == sixbit) return 9;
+        case 8: if ((lo >> 48 & 0x3F) == sixbit) return 8;
+        case 7: if ((lo >> 42 & 0x3F) == sixbit) return 7;
+        case 6: if ((lo >> 36 & 0x3F) == sixbit) return 6;
+        case 5: if ((lo >> 30 & 0x3F) == sixbit) return 5;
+        case 4: if ((lo >> 24 & 0x3F) == sixbit) return 4;
+        case 3: if ((lo >> 18 & 0x3F) == sixbit) return 3;
+        case 2: if ((lo >> 12 & 0x3F) == sixbit) return 2;
+        case 1: if ((lo >> 6 & 0x3F) == sixbit) return 1;
+        case 0: if ((lo & 0x3F) == sixbit) return 0;
+
+        default: return -1;
+    }
+}
+
 // ============================================================================
 // CORE IMPLEMENTATION
 // ============================================================================
@@ -203,6 +275,7 @@ PackedString ps_pack(const char* str) {
     u8 length = 0;
     u8 flags = 0;
     bool has_upper = false;
+    bool start_digit = false;
     bool has_special = false;
 
     // Scan and analyze string
@@ -210,7 +283,7 @@ PackedString ps_pack(const char* str) {
         const char c = str[length];
 
         // Track case information
-        if (c - 'A' <= 26) has_upper = true;
+        if ('A' <= c && c <= 'Z') has_upper = true;
         if (c == '_' || c == '$') has_special = true;
 
         const u8 sixbit = ps_char_to_sixbit(c);
@@ -229,6 +302,8 @@ PackedString ps_pack(const char* str) {
         return PACKED_STRING_INVALID;
     }
 
+    start_digit = length > 0 && '0' <= str[0] && str[0] <= '9';
+
     // Set flags
     if (has_upper) {
         // Mixed case - preserve it
@@ -237,7 +312,7 @@ PackedString ps_pack(const char* str) {
     }
     // All lowercase gets flag=0 (we'll store as lowercase)
 
-    if (length > 0 && str[0] - '0' <= 9) {
+    if (start_digit) {
         // Check first character is digit
         flags |= PACKED_FLAG_STARTS_WITH_DIGIT;
     }
@@ -264,7 +339,7 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
         char c = str[i];
 
         // Apply case folding if not case-sensitive
-        c += ('a' - 'A') * (!(flags & PACKED_FLAG_CASE_SENSITIVE) && c - 'A' <= 26);
+        c += ('a' - 'A') * (!(flags & PACKED_FLAG_CASE_SENSITIVE) && ('A' <= c && c <= 'Z'));
 
         const u8 sixbit = ps_char_to_sixbit(c);
         if (sixbit == UINT8_MAX) {
@@ -506,7 +581,6 @@ bool ps_ends_with(const PackedString ps, const PackedString suffix) {
     );
 }
 
-
 bool ps_starts_with_at(const PackedString ps, const PackedString prefix, const u8 start) {
     const u8 len_ps = ps_length(ps);
     const u8 len_prefix = ps_length(prefix);
@@ -715,51 +789,7 @@ i8 ps_find_char(const PackedString ps, const char c) {
     const u8 len = ps_length(ps);
     if (len == 0) return -1;
 
-    // Check characters 0-9 in lo first (most common case)
-    if (len <= 10) {
-        // All characters are in lo
-        const u64 lo = ps.lo;
-
-        // Create a pattern with target_sixbit in each 6-bit position
-        u64 pattern = 0;
-        for (int i = 0; i < 10; i++) {
-            pattern |= (u64)target_sixbit << (i * 6);
-        }
-
-        // XOR with pattern - 0 bits indicate matches
-        u64 xor_result = lo ^ pattern;
-
-        // Mask to valid length
-        const u64 mask = (1ULL << (len * 6)) - 1;
-        xor_result &= mask;
-
-        // Find first 6-bit chunk that's all zeros (match)
-        for (u8 i = 0; i < len; i++) {
-            if (((xor_result >> (i * 6)) & 0x3F) == 0) return i;
-        }
-        return -1;
-    }
-
-    // Mixed lo/hi case - check lo first
-    const u64 lo = ps.lo;
-    for (u8 i = 0; i < 10; i++) {
-        if (((lo >> (i * 6)) & 0x3F) == target_sixbit) return i;
-    }
-
-    // Check character 10
-    const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-    if (char10 == target_sixbit) return 10;
-
-    // Check characters 11-19 in hi
-    const u8 hi_chars = len - 11;
-    const u64 hi = ps.hi;
-
-    for (u8 i = 0; i < hi_chars; i++) {
-        const u8 sixbit = (hi >> (i * 6 + 2)) & 0x3F;
-        if (sixbit == target_sixbit) return i + 11;
-    }
-
-    return -1;
+    return ps_find(ps.lo, ps.hi, 0, target_sixbit);
 }
 
 i8 ps_find_char_from(const PackedString ps, const char c, const u8 start) {
@@ -769,48 +799,7 @@ i8 ps_find_char_from(const PackedString ps, const char c, const u8 start) {
     const u8 len = ps_length(ps);
     if (start >= len) return -1;
 
-    u8 start_i = start;
-
-    // Fast path: search only in lo
-    if (start_i < 10 && start_i + 10 <= len) {
-        // Start and at least 10 chars in lo
-        u64 lo = ps.lo >> (start_i * 6);
-        u8 search_len = len - start_i;
-        if (search_len > 10) search_len = 10;
-
-        for (u8 i = 0; i < search_len; i++) {
-            if ((lo & 0x3F) == target_sixbit) return start_i + i;
-            lo >>= 6;
-        }
-
-        // If we reached char 10 and didn't find it
-        if (search_len == 10 && len > 10) {
-            start_i = 10;
-        } else {
-            return -1;
-        }
-    }
-
-    // Check char 10 if start_i <= 10
-    if (start_i <= 10 && len > 10) {
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-        if (char10 == target_sixbit) return 10;
-    }
-
-    // Search in hi (chars 11-19)
-    if (start_i >= 11) {
-        const u8 hi_start = start_i - 11;
-        const u8 hi_chars = len - 11;
-
-        u64 hi = ps.hi >> (hi_start * 6 + 2);
-
-        for (u8 i = hi_start; i < hi_chars; i++) {
-            if ((hi & 0x3F) == target_sixbit) return i + 11;
-            hi >>= 6;
-        }
-    }
-
-    return -1;
+    return ps_find(ps.lo, ps.hi, start, target_sixbit);
 }
 
 i8 ps_find_last_char(const PackedString ps, const char c) {
@@ -820,31 +809,7 @@ i8 ps_find_last_char(const PackedString ps, const char c) {
     const u8 len = ps_length(ps);
     if (len == 0) return -1;
 
-    // Search from the end
-    if (len > 10) {
-        // Check hi part first (chars 11-19)
-        const u8 hi_chars = len - 11;
-        const u64 hi = ps.hi;
-
-        for (i8 i = hi_chars - 1; i >= 0; i--) {
-            const u8 sixbit = (hi >> (i * 6 + 2)) & 0x3F;
-            if (sixbit == target_sixbit) return i + 11;
-        }
-
-        // Check char 10
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-        if (char10 == target_sixbit) return 10;
-    }
-
-    // Check lo (chars 0-9 or 0-(len-1) if len <= 10)
-    const u8 lo_len = len > 10 ? 10 : len;
-    const u64 lo = ps.lo;
-
-    for (i8 i = lo_len - 1; i >= 0; i--) {
-        if (((lo >> (i * 6)) & 0x3F) == target_sixbit) return i;
-    }
-
-    return -1;
+    return ps_reverse_find(ps.lo, ps.hi, len - 1, target_sixbit);
 }
 
 bool ps_contains_char(const PackedString ps, const char c) {
@@ -852,87 +817,22 @@ bool ps_contains_char(const PackedString ps, const char c) {
     if (target_sixbit == UINT8_MAX) return false;
 
     const u8 len = ps_length(ps);
+    if (len == 0) return false;
 
-    // Quick check: if target is common, check flags first
-    if (target_sixbit <= 9) {  // Digit 0-9
-        if (!ps_has_digit(ps))
-            return false; // No digits at all
+    return ps_reverse_find(ps.lo, ps.hi, len - 1, target_sixbit) != -1;
+}
 
-        // Has digits, need to check if this specific digit exists
-        // Continue with normal check
+bool ps_contains(const PackedString ps, const PackedString pat) {
+    const u8 n = ps_length(ps);
+    const u8 m = ps_length(pat);
+
+    if (m > n) return false;
+
+    for (u8 i = 0; i <= n - m; ++i) {
+        if (ps_is_at(ps.lo, ps.hi, n,
+            pat.lo, pat.hi, m, i))
+            return true;
     }
-
-    // For very short strings (≤5 chars), check directly
-    if (len <= 5) {
-        switch (len) {
-            case 5: if (((ps.lo >> 24) & 0x3F) == target_sixbit) return true;
-            case 4: if (((ps.lo >> 18) & 0x3F) == target_sixbit) return true;
-            case 3: if (((ps.lo >> 12) & 0x3F) == target_sixbit) return true;
-            case 2: if (((ps.lo >> 6) & 0x3F) == target_sixbit) return true;
-            case 1: if ((ps.lo & 0x3F) == target_sixbit) return true;
-
-            case 0:
-            default: return false;
-        }
-    }
-
-    // Create a test pattern
-    const u64 test_pattern = 0x3F3F3F3F3F3F3F3FULL;  // All 6-bit chunks set
-
-    // XOR lo with pattern of target_sixbit
-    u64 lo_pattern = 0;
-    u64 temp = target_sixbit;
-    for (u8 i = 0; i < 10; i++) {
-        lo_pattern |= temp;
-        temp <<= 6;
-    }
-
-    u64 lo_match = ~(ps.lo ^ lo_pattern);  // Bits are 1 where they match
-    lo_match &= test_pattern;  // Isolate each 6-bit chunk
-
-    // Check if any chunk has all 6 bits set (full match)
-    // We can do this by comparing each chunk to 0x3F
-
-    if (len <= 10) {
-        // Only check relevant chunks
-        const u64 mask = (1ULL << (len * 6)) - 1;
-        lo_match &= mask;
-
-        // If lo_match != 0, we have a match somewhere
-        // Need to check if any chunk is all 1's (0x3F)
-        while (lo_match != 0) {
-            if ((lo_match & 0x3F) == 0x3F) return true;
-            lo_match >>= 6;
-        }
-        return false;
-    }
-
-    // Check lo first
-    u64 lo_check = lo_match & ((1ULL << 60) - 1);  // First 10 chars
-    while (lo_check != 0) {
-        if ((lo_check & 0x3F) == 0x3F) return true;
-        lo_check >>= 6;
-    }
-
-    // Check char 10
-    const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-    if (char10 == target_sixbit) return true;
-
-    // Check hi
-    u8 hi_chars = len - 11;
-    u64 hi_pattern = 0;
-    temp = target_sixbit;
-    for (int i = 0; i < hi_chars; i++) {
-        hi_pattern |= temp << (i * 6 + 2);
-    }
-
-    u64 hi_match = ~((ps.hi & 0x00FFFFFFFFFFFFFFULL) ^ hi_pattern);
-
-    while (hi_chars-- > 0) {
-        if ((hi_match & 0x3F) == 0x3F) return true;
-        hi_match >>= 6;
-    }
-
     return false;
 }
 
@@ -1054,12 +954,12 @@ bool ps_is_valid_identifier(const PackedString ps) {
 
     // Check first character is valid (not digit, already checked by flag)
     const u8 first_sixbit = ps.lo & 0x3F;
-    if (first_sixbit > 63) return false;
+    if (first_sixbit > 64) return false;
 
     // Check remaining characters
     for (u8 i = 1; i < len; i++) {
         const u8 sixbit = ps_sixbit_at(ps, i);
-        if (sixbit > 63) return false;  // Invalid character
+        if (sixbit > 64) return false;  // Invalid character
     }
 
     return true;

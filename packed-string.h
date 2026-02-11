@@ -389,6 +389,15 @@ i8 ps_find_last_char(PackedString ps, char c);
  */
 bool ps_contains_char(PackedString ps, char c);
 
+/**
+ * Check if string contains pattern.
+ *
+ * @param ps Packed string
+ * @param pat Pattern to check
+ * @return true if pattern validated
+ */
+bool ps_contains(PackedString ps, PackedString pat);
+
 // ============================================================================
 // HASHING
 // ============================================================================
