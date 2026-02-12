@@ -268,6 +268,14 @@ static inline i8 ps_reverse_find(
 // CORE IMPLEMENTATION
 // ============================================================================
 
+PackedString ps_make(const u64 lo, const u64 hi, const u8 length, const u8 flags) {
+    const u64 m = ps_pack_metadata(length, flags);
+    u64 h = hi;
+
+    ps_insert_metadata(&h, m);
+    return (PackedString){.lo = lo, .hi = h};
+}
+
 PackedString ps_pack(const char* str) {
     if (!str) return PACKED_STRING_INVALID;
 

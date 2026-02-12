@@ -89,6 +89,28 @@ static inline bool ps_valid(const PackedString ps) {
 }
 
 /**
+ * Short Hand for (PackedString){.lo = lo, .hi = hi}.
+ *
+ * @param lo Lower 64 bits
+ * @param hi Upper 64 bits
+ * @return Packed string
+ */
+static inline PackedString ps_from(const u64 lo, const u64 hi) {
+    return (PackedString){.lo = lo, .hi = hi};
+}
+
+/**
+ * Make a packed string with given values.
+ *
+ * @param lo Lower 64 bits
+ * @param hi Upper 64 bits
+ * @param length Length of string
+ * @param flags Flags of string
+ * @return Packed string
+ */
+PackedString ps_make(u64 lo, u64 hi, u8 length, u8 flags);
+
+/**
  * Pack a C string into PackedString (max 20 chars).
  * Smart flags detection.
  * 
@@ -164,17 +186,6 @@ static inline bool ps_is_case_sensitive(const PackedString ps) {
 // ============================================================================
 // CHARACTER ACCESS
 // ============================================================================
-
-/**
- * Short Hand for (PackedString){.lo = lo, .hi = hi}.
- *
- * @param lo
- * @param hi
- * @return
- */
-static inline PackedString ps(const u64 lo, const u64 hi) {
-    return (PackedString){.lo = lo, .hi = hi};
-}
 
 /**
  * Get sixbit at position (0-based).
