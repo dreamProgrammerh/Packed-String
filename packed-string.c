@@ -985,88 +985,91 @@ i32 ps_debug_binary(const PackedString ps, const bool separated, char* buffer) {
 
     char* ptr = buffer;
 
-    if (separated) {
-        // Format with separation: [20 chars × 6 bits] [8 bits metadata]
-        const u8 len = ps_length(ps);
+    #define BIT($) ($) & 1 ? '1' : '0'
 
-        // 1. Print characters 0-9 from lo (60 bits)
-        for (int i = 0; i < 10; i++) {
-            // Get 6-bit character
-            const u8 sixbit = i < len
-                ? ps.lo >> (i * 6) & 0x3F
-                : 0; // Unused character slot
-
-            // Print as 6 binary digits
-            for (int bit = 5; bit >= 0; bit--) {
-                *ptr++ = (sixbit >> bit) & 1 ? '1' : '0';
-            }
-
-            // Separator between characters
-            if (i < 9) *ptr++ = ' ';
-        }
-
-        // Separator between lo and char10
-        *ptr++ = '|';
-        *ptr++ = ' ';
-
-        // 2. Print character 10 (split between lo[60:63] and hi[0:1])
-        if (len > 10) {
-            const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-            for (int bit = 5; bit >= 0; bit--) {
-                *ptr++ = (char10 >> bit) & 1 ? '1' : '0';
-            }
-        } else {
-            // Unused character 10
-            for (int bit = 5; bit >= 0; bit--) {
-                *ptr++ = '0';
-            }
-        }
-
-        // Separator between char10 and chars 11-19
-        *ptr++ = ' ';
-        *ptr++ = '|';
-        *ptr++ = ' ';
-
-        // 3. Print characters 11-19 from hi[2:56] (54 bits)
-        for (int i = 0; i < 9; i++) {
-            const u8 sixbit = i + 11 < len
-                ? ps.lo >> (i * 6) & 0x3F
-                : 0; // Unused character slot
-
-            for (int bit = 5; bit >= 0; bit--) {
-                *ptr++ = (sixbit >> bit) & 1 ? '1' : '0';
-            }
-
-            if (i < 8) *ptr++ = ' ';
-        }
-
-        // Separator between characters and metadata
-        *ptr++ = ' ';
-        *ptr++ = '|';
-        *ptr++ = ' ';
-
-        // 4. Print metadata (8 bits in hi[56:63])
-        const u8 metadata = ps_extract_metadata(ps.hi);
-        for (int bit = 7; bit >= 0; bit--) {
-            *ptr++ = (metadata >> bit) & 1 ? '1' : '0';
-            if (bit == 5 || bit == 0) *ptr++ = ':';  // Mark length/flags boundary
-        }
-
-    } else {
+    if (!separated) {
         // Simple binary: 128 bits continuous
         // Print hi word first (big-endian style)
-        for (int i = 63; i >= 0; i--) {
-            *ptr++ = (ps.hi >> i) & 1 ? '1' : '0';
+        for (i8 i = 63; i >= 0; i--) {
+            *ptr++ = BIT(ps.hi >> i);
         }
 
         // Separator between words
         *ptr++ = ' ';
 
         // Print lo word
-        for (int i = 63; i >= 0; i--) {
-            *ptr++ = (ps.lo >> i) & 1 ? '1' : '0';
+        for (i8 i = 63; i >= 0; i--) {
+            *ptr++ = BIT(ps.lo >> i);
+        }
+
+        // Close buffer and return length
+        *ptr = '\0';
+        return (i32)((size_t)ptr - (size_t)buffer);
+    }
+
+    // Format with separation:
+    // - [20 chars * 6 bits] [8 bits metadata]
+    const u8 len = ps_length(ps);
+
+    // Print characters 0-9 from lo (60 bits)
+    for (u8 i = 0; i < 10; i++) {
+        // Get 6-bit character
+        const u8 sixbit = i < len
+            ? ps_get_lo(ps.lo, i)
+            : 0; // Unused character slot
+
+        // Print as 6 binary digits
+        for (i8 bit = 5; bit >= 0; bit--) {
+            *ptr++ = (BIT(sixbit >> bit));
+        }
+
+        // Separator between characters
+        if (i < 9) *ptr++ = ' ';
+    }
+
+    // Separator between lo and char10
+    *ptr++ = ' '; *ptr++ = '|'; *ptr++ = ' ';
+
+    // Print character 10 (split between lo[60:63] and hi[0:1])
+    if (len > 10) {
+        const u8 char10 = ps_get_mid(ps.lo, ps.hi);
+        for (i8 bit = 5; bit >= 0; bit--) {
+            *ptr++ = BIT(char10 >> bit);
+        }
+    } else {
+        // Unused character 10
+        for (i8 bit = 5; bit >= 0; bit--) {
+            *ptr++ = '0';
         }
     }
+
+    // Separator between char10 and chars 11-19
+    *ptr++ = ' '; *ptr++ = '|'; *ptr++ = ' ';
+
+    // Print characters 11-19 from hi[2:56] (54 bits)
+    for (u8 i = 0; i < 9; i++) {
+        const u8 sixbit = i + 11 < len
+            ? ps_get_hi(ps.hi, i)
+            : 0; // Unused character slot
+
+        for (i8 bit = 5; bit >= 0; bit--) {
+            *ptr++ = BIT(sixbit >> bit);
+        }
+
+        if (i < 8) *ptr++ = ' ';
+    }
+
+    // Separator between characters and metadata
+    *ptr++ = ' '; *ptr++ = '|'; *ptr++ = ' ';
+
+    // Print metadata (8 bits in hi[56:63])
+    const u8 metadata = ps_extract_metadata(ps.hi);
+    for (i8 bit = 7; bit >= 0; bit--) {
+        *ptr++ = BIT(metadata >> bit);
+        if (bit == 5) *ptr++ = ':';  // Mark length/flags boundary
+    }
+
+    #undef BIT
 
     *ptr = '\0';
     return (i32)((size_t)ptr - (size_t)buffer);
@@ -1125,7 +1128,7 @@ i32 ps_debug_info(const PackedString ps, char* buffer) {
     char layout_buf[256] = "";
     snprintf(layout_buf, sizeof(layout_buf),
              "lo[0:59]=chars0-9 lo[60:63]+hi[0:1]=char10 "
-             "hi[2:56]=chars11-19 hi[56:63]=metadata");
+             "hi[2:55]=chars11-19 hi[56:63]=metadata");
 
     // Format final string
     const i32 len = snprintf(buffer, 512,
