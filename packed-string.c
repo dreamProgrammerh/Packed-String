@@ -969,7 +969,7 @@ bool ps_is_valid_identifier(const PackedString ps) {
 // DEBUGGING & FORMATTING
 // ============================================================================
 
-i32 ps_debug_hex(const PackedString ps, char* buffer) {
+i32 psd_hex(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     // Format as 32-character hex: 16 bytes = 32 hex chars
@@ -980,32 +980,34 @@ i32 ps_debug_hex(const PackedString ps, char* buffer) {
     return len;
 }
 
-i32 ps_debug_binary(const PackedString ps, const bool separated, char* buffer) {
-    if (!buffer) return -1;
+#define BIT($) ($) & 1 ? '1' : '0'
 
+i32 psd_binary(const PackedString ps, char* buffer) {
+    if (!buffer) return -1;
     char* ptr = buffer;
 
-    #define BIT($) ($) & 1 ? '1' : '0'
-
-    if (!separated) {
-        // Simple binary: 128 bits continuous
-        // Print hi word first (big-endian style)
-        for (i8 i = 63; i >= 0; i--) {
-            *ptr++ = BIT(ps.hi >> i);
-        }
-
-        // Separator between words
-        *ptr++ = ' ';
-
-        // Print lo word
-        for (i8 i = 63; i >= 0; i--) {
-            *ptr++ = BIT(ps.lo >> i);
-        }
-
-        // Close buffer and return length
-        *ptr = '\0';
-        return (i32)((size_t)ptr - (size_t)buffer);
+    // Simple binary: 128 bits continuous
+    // Print hi word first (big-endian style)
+    for (i8 i = 63; i >= 0; i--) {
+        *ptr++ = BIT(ps.hi >> i);
     }
+
+    // Separator between words
+    *ptr++ = ' ';
+
+    // Print lo word
+    for (i8 i = 63; i >= 0; i--) {
+        *ptr++ = BIT(ps.lo >> i);
+    }
+
+    // Close buffer and return length
+    *ptr = '\0';
+    return (i32)((size_t)ptr - (size_t)buffer);
+}
+
+i32 psd_encoding_binary(const PackedString ps, char* buffer) {
+    if (!buffer) return -1;
+    char* ptr = buffer;
 
     // Format with separation:
     // - [20 chars * 6 bits] [8 bits metadata]
@@ -1069,13 +1071,14 @@ i32 ps_debug_binary(const PackedString ps, const bool separated, char* buffer) {
         if (bit == 5) *ptr++ = ':';  // Mark length/flags boundary
     }
 
-    #undef BIT
 
     *ptr = '\0';
     return (i32)((size_t)ptr - (size_t)buffer);
 }
 
-i32 ps_debug_info(const PackedString ps, char* buffer) {
+#undef BIT
+
+i32 psd_info(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     char str_buf[PACKED_STRING_MAX_LEN + 1];
@@ -1160,7 +1163,7 @@ i32 ps_debug_info(const PackedString ps, char* buffer) {
     return len;
 }
 
-i32 ps_visualize_bits(const PackedString ps, char* buffer) {
+i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     char* ptr = buffer;
@@ -1282,7 +1285,7 @@ i32 ps_visualize_bits(const PackedString ps, char* buffer) {
     return (i32)((size_t)ptr - (size_t)buffer);
 }
 
-i32 ps_inspect(const PackedString ps, char* buffer) {
+i32 psd_inspect(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     if (!ps_valid(ps)) {
@@ -1310,7 +1313,7 @@ i32 ps_inspect(const PackedString ps, char* buffer) {
     return length;
 }
 
-i32 ps_to_cstr(const PackedString ps, char* buffer) {
+i32 psd_cstr(const PackedString ps, char* buffer) {
     if (!ps_valid(ps)) {
         // Return special marker for invalid strings
         static const char* invalid_markers[] = {
@@ -1344,4 +1347,12 @@ i32 ps_to_cstr(const PackedString ps, char* buffer) {
     // Valid string
     ps_unpack(ps, buffer);
     return ps_length(ps);
+}
+
+static __thread char debug_buffer[1024];
+
+char* psd_warper(void (*func)(PackedString ps, char* buffer),
+    const PackedString ps) {
+    func(ps, debug_buffer);
+    return debug_buffer;
 }

@@ -166,6 +166,17 @@ static inline bool ps_is_case_sensitive(const PackedString ps) {
 // ============================================================================
 
 /**
+ * Short Hand for (PackedString){.lo = lo, .hi = hi}.
+ *
+ * @param lo
+ * @param hi
+ * @return
+ */
+static inline PackedString ps(const u64 lo, const u64 hi) {
+    return (PackedString){.lo = lo, .hi = hi};
+}
+
+/**
  * Get sixbit at position (0-based).
  * Returns UINT8_MAX if index out of bounds.
  *
@@ -469,17 +480,25 @@ bool ps_validate(PackedString ps);
  * @param buffer Output buffer (33 bytes min)
  * @return -1 if (buffer is invalid) else (output length + null)
  */
-i32 ps_debug_hex(PackedString ps, char* buffer);
+i32 psd_hex(PackedString ps, char* buffer);
 
 /**
- * Format as binary string (128 chars + null).
+ * Format as binary string (129 chars + null).
  *
  * @param ps Packed string
- * @param separated separate each 6 bit chars, and last 8 bit metadata
- * @param buffer Output buffer (129 bytes min)
+ * @param buffer Output buffer (30 bytes min)
  * @return -1 if (buffer is invalid) else (output length + null)
  */
-i32 ps_debug_binary(PackedString ps, bool separated, char* buffer);
+i32 psd_binary(PackedString ps, char* buffer);
+
+/**
+ * Format encoding char by char as binary string.
+ *
+ * @param ps Packed string
+ * @param buffer Output buffer
+ * @return -1 if (buffer is invalid) else (output length + null)
+ */
+i32 psd_encoding_binary(PackedString ps, char* buffer);
 
 /**
  * Format packed string info for debugging.
@@ -488,7 +507,7 @@ i32 ps_debug_binary(PackedString ps, bool separated, char* buffer);
  * @param buffer Output buffer
  * @return Pointer to buffer
  */
-i32 ps_debug_info(PackedString ps, char* buffer);
+i32 psd_info(PackedString ps, char* buffer);
 
 /**
  * Visualize encoded bits as string.
@@ -497,7 +516,7 @@ i32 ps_debug_info(PackedString ps, char* buffer);
  * @param buffer Output buffer
  * @return -1 if (buffer is invalid) else (output length + null)
 */
-i32 ps_visualize_bits(PackedString ps, char* buffer);
+i32 psd_visualize_bits(PackedString ps, char* buffer);
 
 /**
  * Format packed string data as string aka (toString).
@@ -506,7 +525,7 @@ i32 ps_visualize_bits(PackedString ps, char* buffer);
  * @param buffer Output buffer
  * @return -1 if (buffer is invalid) else (output length + null)
 */
-i32 ps_inspect(PackedString ps, char* buffer);
+i32 psd_inspect(PackedString ps, char* buffer);
 
 /**
  * Get c string representation.
@@ -515,7 +534,17 @@ i32 ps_inspect(PackedString ps, char* buffer);
  * @param buffer Output buffer
  * @return C string length including null
  */
-i32 ps_to_cstr(PackedString ps, char* buffer);
+i32 psd_cstr(PackedString ps, char* buffer);
+
+/**
+ * Warp debug functions with a temporary buffer.
+ * Warning: this use a thread local buffer do not use it others than printing.
+ *
+ * @param func Debug function to call
+ * @param ps Packed string
+ * @return C string length including null
+ */
+char* psd_warper(void (*func)(PackedString ps, char* buffer), PackedString ps);
 
 // ============================================================================
 // COMPILE-TIME HELPERS
