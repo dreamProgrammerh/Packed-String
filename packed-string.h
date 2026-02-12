@@ -44,6 +44,11 @@ typedef struct packed_string {
     u64 hi;  // Upper 64 bits: chars 11-19 (60 bits) + 8 bits metadata
 } PackedString;
 
+
+// Error cases
+#define PS_INVALID 31
+#define PS_NULL 30
+
 // Constants
 #define PACKED_STRING_MAX_LEN 20
 #define PACKED_STRING_ALPHABET "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$"
@@ -86,6 +91,15 @@ static inline u8 ps_flags(const PackedString ps) {
  */
 static inline bool ps_valid(const PackedString ps) {
     return (ps.hi >> 59) <= PACKED_STRING_MAX_LEN;
+}
+
+/**
+ * Make an empty packed string
+ *
+ * @return Empty packed string
+ */
+static inline PackedString ps_empty(void) {
+    return (PackedString){.lo = 0, .hi = 0};
 }
 
 /**

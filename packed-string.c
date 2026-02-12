@@ -60,13 +60,29 @@ static const u8 TO_UPPER_TABLE[64] = {
     62,63
 };
 
-static inline void ps_shl6(u64 *restrict lo, u64 *restrict hi) {
-    *hi = (*hi << 6) | (*lo >> 58);
-    *lo <<= 6;
+static inline void ps_shl(u64 *restrict lo, u64 *restrict hi, const u8 shift) {
+    *hi = *hi << shift | *lo >> (64 - shift);
+    *lo <<= shift;
 }
 
-static inline void ps_insert6(u64* lo, const u8 v) {
-    *lo |= (u64)v;
+static inline void ps_shr(u64 *restrict lo, u64 *restrict hi, const u8 shift) {
+    *lo = *hi << (64 - shift) | *lo >> shift;
+    *hi >>= shift;
+}
+
+static inline void ps_mask(u64 *restrict lo, u64 *restrict hi, const u8 start, const u8 length) {
+    const u8 lo_len = 64 - start;
+    const u8 hi_len = length - lo_len;
+    u64 lo_mask = ~0ULL, hi_mask = ~0ULL;
+
+    if (lo_len != 64)
+        lo_mask = ((1ULL << lo_len) - 1ULL) << start;
+
+    if (hi_len != 64)
+        hi_mask = (1ULL << hi_len) - 1ULL;
+
+    *lo &= lo_mask;
+    *hi &= hi_mask;
 }
 
 static inline u8 ps_get_mid(const u64 lo, const u64 hi) {
@@ -616,56 +632,30 @@ bool ps_ends_with_at(const PackedString ps, const PackedString suffix, const u8 
 }
 
 PackedString ps_substring(const PackedString ps, const u8 start, const u8 length) {
-    const u8 total_len = ps_length(ps);
-    u8 len = length;
+    const u8 total = ps_length(ps);
 
-    if (start >= total_len || len == 0)
-        return (PackedString){.lo = 0, .hi = 0};
+    if (length == 0 || start + length > total)
+        return ps_empty();
 
-    // Adjust len if it goes beyond the end
-    if (start + len > total_len)
-        len = total_len - start;
+    u64 lo = ps.lo, hi = ps.hi;
 
-    PackedString result = { 0 };
+    const u32 bit_start = (u32)start * 6;
+    const u32 bit_len   = (u32)length * 6;
 
-    // Fast path: substring entirely within lo (chars 0-9)
-    if (start < 10 && start + len <= 10) {
-        // Extract bits from lo
-        const u64 mask = ((1ULL << (len * 6)) - 1) << (start * 6);
-        const u64 extracted = (ps.lo & mask) >> (start * 6);
-        result.lo = extracted;
+    if (bit_start != 0)
+        ps_shr(&lo, &hi, bit_start);
 
-        // Set metadata
-        const u8 metadata = ps_pack_metadata(len, ps_flags(ps));
-        ps_insert_metadata(&result.hi, metadata);
-        return result;
+    if (bit_len < 64) {
+        lo &= (1ULL << bit_len) - 1ULL;
+    } else /* if bit_len > 64 */ {
+        hi &= (1ULL << (bit_len - 64)) - 1ULL;
     }
+    // bit_len cannot be 64 because 64 % 6 != 0
 
-    // Fast path: substring entirely within hi (chars 11-19)
-    if (start >= 11) {
-        // Extract from hi[2:56]
-        const u8 hi_start = start - 11;
-        const u64 mask = ((1ULL << (len * 6)) - 1) << (hi_start * 6 + 2);
-        const u64 extracted = (ps.hi & mask) >> (hi_start * 6 + 2);
+    const u8 meta = ps_pack_metadata(length, 0);
+    ps_insert_metadata(&hi, meta);
 
-        // Store in result.lo (since substring will be short)
-        result.lo = extracted;
-
-        // Set metadata
-        const u8 metadata = ps_pack_metadata(len, ps_flags(ps));
-        ps_insert_metadata(&result.hi, metadata);
-        return result;
-    }
-
-    // Complex case: crosses lo/hi boundary
-    // We'll handle it efficiently by copying bits
-    char buffer[PACKED_STRING_MAX_LEN + 1];
-    for (u8 i = 0; i < len; i++) {
-        buffer[i] = ps_char_at(ps, start + i);
-    }
-
-    buffer[len] = '\0';
-    return ps_pack(buffer);
+    return (PackedString){ .lo=lo, .hi=hi };
 }
 
 PackedString ps_concat(const PackedString a, const PackedString b) {
