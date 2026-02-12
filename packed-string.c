@@ -116,17 +116,15 @@ static inline void ps_set_hi(u64* hi, const u8 n, const u8 sixbit) {
 }
 
 static inline u8 ps_get_n_sixbit(const u64 lo, const u64 hi, const u8 n) {
-    if (n < 10) {
+    if (n < 10)
         return lo >> (n * 6) & 0x3F;
-    }
 
-    if (n > 10) {
-        const i32 shift = (n - 11) * 6 + 2;
-        return hi >> shift & 0x3F;
-    }
+    if (n == 10)
+        return (hi & 0x3) << 4 | lo >> 60 & 0xF;
 
-    // n == 10
-    return (hi & 0x3) << 4 | lo >> 60 & 0xF;
+    // n > 10
+    const i32 shift = (n - 11) * 6 + 2;
+    return hi >> shift & 0x3F;
 }
 
 static inline void ps_set_n_sixbit(u64 *restrict lo, u64 *restrict hi, const u8 n, const u8 sixbit) {
@@ -134,16 +132,16 @@ static inline void ps_set_n_sixbit(u64 *restrict lo, u64 *restrict hi, const u8 
         const u8 shift = (n * 6);
         *lo &= ~(0x3FULL << shift);
         *lo |= (u64)sixbit << shift;
-    } else if (n > 10) {
-        // n > 10 (11-19)
-        const u8 shift = (n - 11) * 6 + 2;
-        *hi &= ~(0x3FULL << shift);
-        *hi |= (u64)sixbit << shift;
-    } else {
+    } else if (n == 10) {
         *lo &= ~(0xFULL << 60);
         *hi &= ~0x3ULL;
         *lo |= (u64)(sixbit & 0xF) << 60;
         *hi |= sixbit >> 4 & 0x3;
+    } else {
+        // n > 10 (11-19)
+        const u8 shift = (n - 11) * 6 + 2;
+        *hi &= ~(0x3FULL << shift);
+        *hi |= (u64)sixbit << shift;
     }
 }
 
@@ -445,8 +443,8 @@ char ps_last_char(const PackedString ps) {
 // ============================================================================
 
 bool ps_equal_nocase(const PackedString a, const PackedString b) {
-    // Exact match (including case)
-    if (ps_equal(a, b)) return true;
+    // Equal match (including case)
+    if (ps_equal_nometa(a, b)) return true;
 
     const u8 len_a = ps_length(a);
     const u8 len_b = ps_length(b);
@@ -454,49 +452,37 @@ bool ps_equal_nocase(const PackedString a, const PackedString b) {
     // Different lengths can't be equal
     if (len_a != len_b) return false;
 
-    // Process in 64-bit chunks where possible
+    const u8 lo_len = len_a > 10 ? 10 : len_a;
+
     // First, handle characters 0-9 in lo
+    for (u8 i = 0; i < lo_len; i++) {
+        const u8 a_sixbit = ps_get_lo(a.lo, i);
+        const u8 b_sixbit = ps_get_lo(b.lo, i);
 
-    // Create case-folded versions of lo chunks
-    u64 a_lo_folded = 0;
-    u64 b_lo_folded = 0;
-
-    const u8 compare_lo_len = len_a > 10 ? 10 : len_a;
-
-    for (u8 i = 0; i < compare_lo_len; i++) {
-        const u8 a_sixbit = (a.lo >> (i * 6)) & 0x3F;
-        const u8 b_sixbit = (b.lo >> (i * 6)) & 0x3F;
-
-        a_lo_folded |= (u64)TO_LOWER_TABLE[a_sixbit] << (i * 6);
-        b_lo_folded |= (u64)TO_LOWER_TABLE[b_sixbit] << (i * 6);
+        if (TO_LOWER_TABLE[a_sixbit] != TO_LOWER_TABLE[b_sixbit])
+            return false;
     }
-
-    // Compare folded lo parts
-    if (a_lo_folded != b_lo_folded) return false;
 
     // Check character 10 if present
     if (len_a > 10) {
-        const u8 a_char10 = ((a.lo >> 60) & 0xF) | ((a.hi & 0x3) << 4);
-        const u8 b_char10 = ((b.lo >> 60) & 0xF) | ((b.hi & 0x3) << 4);
+        const u8 a_char10 = ps_get_mid(a.lo, b.lo);
+        const u8 b_char10 = ps_get_mid(a.lo, b.lo);
 
-        if (TO_LOWER_TABLE[a_char10] != TO_LOWER_TABLE[b_char10]) {
+        if (TO_LOWER_TABLE[a_char10] != TO_LOWER_TABLE[b_char10])
             return false;
-        }
     }
 
+    if (len_a <= 11) return true;
+
+    const u8 hi_len = len_a - 11;
+
     // Check characters 11-19 in hi
-    if (len_a > 11) {
-        const u8 hi_chars = len_a - 11;
+    for (u8 i = 0; i < hi_len; i++) {
+        const u8 a_sixbit = ps_get_hi(a.hi, i);
+        const u8 b_sixbit = ps_get_hi(b.hi, i);
 
-        for (u8 i = 0; i < hi_chars; i++) {
-            const u8 shift = i * 6 + 2;
-            const u8 a_sixbit = (a.hi >> shift) & 0x3F;
-            const u8 b_sixbit = (b.hi >> shift) & 0x3F;
-
-            if (TO_LOWER_TABLE[a_sixbit] != TO_LOWER_TABLE[b_sixbit]) {
-                return false;
-            }
-        }
+        if (TO_LOWER_TABLE[a_sixbit] != TO_LOWER_TABLE[b_sixbit])
+            return false;
     }
 
     return true;
@@ -504,66 +490,51 @@ bool ps_equal_nocase(const PackedString a, const PackedString b) {
 
 i32 ps_compare(const PackedString a, const PackedString b) {
     // Fast equality check
-    if (ps_equal(a, b)) return 0;
+    if (ps_equal_nometa(a, b)) return 0;
 
-    const u8 len_a = ps_length(a);
-    const u8 len_b = ps_length(b);
-    const u8 min_len = len_a < len_b ? len_a : len_b;
+    const u8 la = ps_length(a);
+    const u8 lb = ps_length(b);
 
-    // Compare first min(10, min_len) characters from lo
-    const u8 compare_lo_len = min_len > 10 ? 10 : min_len;
-    const u64 mask_lo = (1ULL << (compare_lo_len * 6)) - 1;
+    const u8 min = la < lb ? la : lb;
 
-    const u64 a_lo_part = a.lo & mask_lo;
-    const u64 b_lo_part = b.lo & mask_lo;
+    /* Compare first 10 characters */
+    if (min < 10) {
+        const u64 mask = (1ULL << (min * 6)) - 1;
+        const u64 da = a.lo & mask;
+        const u64 db = b.lo & mask;
 
-    if (a_lo_part != b_lo_part) {
-        // Find first differing character in lo
-        u64 const diff = a_lo_part ^ b_lo_part;
-        i32 const first_diff_bit = __builtin_ctzll(diff);
-        i32 const char_pos = first_diff_bit / 6;
+        if (da != db)
+            return da < db ? -1 : 1;
 
-        const u8 a_char = (a.lo >> (char_pos * 6)) & 0x3F;
-        const u8 b_char = (b.lo >> (char_pos * 6)) & 0x3F;
-        return (a_char < b_char) ? -1 : 1;
+        return (i32)la - (i32)lb;
     }
 
-    // If we compared all characters in lo and min_len > 10, check char 10
-    if (min_len > 10) {
-        // Compare character 10 (split between lo[60:63] and hi[0:1])
-        const u8 a_char10 = ((a.lo >> 60) & 0xF) | ((a.hi & 0x3) << 4);
-        const u8 b_char10 = ((b.lo >> 60) & 0xF) | ((b.hi & 0x3) << 4);
-
-        if (a_char10 != b_char10) {
-            return (a_char10 < b_char10) ? -1 : 1;
-        }
+    if (a.lo != b.lo) {
+        return a.lo < b.lo ? -1 : 1;
     }
 
-    // Compare characters 11-19 in hi
-    if (min_len > 11) {
-        const u8 compare_hi_len = min_len - 11;
-        const u64 mask_hi = (1ULL << (compare_hi_len * 6)) - 1;
+    /* Compare middle character (char 10) */
+    if (min > 10) {
+        const u8 ca = ((a.hi & 0x3) << 4) | (a.lo >> 60);
+        const u8 cb = ((b.hi & 0x3) << 4) | (b.lo >> 60);
 
-        // hi[2:56] contains chars 11-19, shifted by 2 bits
-        const u64 a_hi_part = (a.hi >> 2) & (mask_hi << 2);
-        const u64 b_hi_part = (b.hi >> 2) & (mask_hi << 2);
-
-        if (a_hi_part != b_hi_part) {
-            // Find first differing character in hi
-            const u64 diff = a_hi_part ^ b_hi_part;
-            const i32 first_diff_bit = __builtin_ctzll(diff);
-            const i32 char_pos = first_diff_bit / 6;  // Relative to hi
-
-            const u8 a_char = (a.hi >> (char_pos * 6 + 2)) & 0x3F;
-            const u8 b_char = (b.hi >> (char_pos * 6 + 2)) & 0x3F;
-            return (a_char < b_char) ? -1 : 1;
-        }
+        if (ca != cb) return ca < cb ? -1 : 1;
+    } else if (min == 10) {
+        return (i32)la - (i32)lb;
     }
 
-    // All compared characters equal, compare lengths
-    if (len_a < len_b) return -1;
-    if (len_a > len_b) return 1;
-    return 0;
+    /* Compare remaining high block (11–19) */
+    if (min > 11) {
+        const u32 bits = (min - 11) * 6;
+        const u64 mask = (1ULL << bits) - 1;
+
+        const u64 ha = (a.hi >> 2) & mask;
+        const u64 hb = (b.hi >> 2) & mask;
+
+        if (ha != hb) return ha < hb ? -1 : 1;
+    }
+
+    return (i32)la - (i32)lb;
 }
 
 // ============================================================================
@@ -660,120 +631,90 @@ PackedString ps_substring(const PackedString ps, const u8 start, const u8 length
 
 PackedString ps_concat(const PackedString a, const PackedString b) {
     const u8 len_a = ps_length(a);
-    u8 len_b = ps_length(b);
+    const u8 len_b = ps_length(b);
 
-    if (len_a + len_b > PACKED_STRING_MAX_LEN) {
-        // Truncate 'b' to fit
-        len_b = PACKED_STRING_MAX_LEN - len_a;
-        if (len_b == 0) return a;
-    }
+    if (len_a == 20) return a;
 
-    PackedString result = {0};
+    const u8 a_bits = len_a * 6;
+    u64 lo = b.lo, hi = b.hi;
 
-    // Copy all of 'a' i32o result
-    result.lo = a.lo;
-    result.hi = a.hi & 0x00FFFFFFFFFFFFFFULL;  // Clear metadata
+    ps_shl(&lo, &hi, a_bits);
 
-    u8 current_pos = len_a;
+    lo |= a.lo;
+    hi |= a.hi;
 
-    // Append 'b' character by character (but using sixbit directly)
-    for (u8 i = 0; i < len_b; i++) {
-        const u8 sixbit = ps_sixbit_at(b, i);
-        ps_set_n_sixbit(&result.lo, &result.hi, current_pos, sixbit);
-        current_pos++;
-    }
+    const u8 new_length = len_a + len_b > 20 ? 20 : len_a + len_b;
+    const u8 new_flags = ps_flags(a) | ps_flags(b);
+    const u8 metadata = ps_pack_metadata(new_length, new_flags);
+    ps_insert_metadata(&hi, metadata);
 
-    // Set new metadata
-    const u8 new_len = len_a + len_b;
-    const u8 new_flags = ps_flags(a) | ps_flags(b);  // Combine flags
-
-    const u8 metadata = ps_pack_metadata(new_len, new_flags);
-    ps_insert_metadata(&result.hi, metadata);
-
-    return result;
+    return (PackedString){ .lo=lo, .hi=hi };
 }
 
 PackedString ps_to_lower(const PackedString ps) {
-    PackedString result = ps;
     const u8 len = ps_length(ps);
+    u64 lo = ps.lo, hi = ps.hi;
 
     // Process characters in lo (0-9)
-    for (u8 i = 0; i < len && i < 10; i++) {
-        const u8 sixbit = (ps.lo >> (i * 6)) & 0x3F;
-        const u8 new_sixbit = TO_LOWER_TABLE[sixbit];
-
-        // Clear old sixbit and insert new
-        result.lo &= ~(0x3FULL << (i * 6));
-        result.lo |= (u64)new_sixbit << (i * 6);
+    for (u8 i = 0; i < 10 && i < len; i++) {
+        u8 sixbit = ps_get_lo(lo, i);
+        sixbit = TO_LOWER_TABLE[sixbit];
+        ps_set_lo(&lo, i, sixbit);
     }
 
-    // Process character 10 if needed
+    // Process character 10 if exist
     if (len > 10) {
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-        const u8 new_char10 = TO_LOWER_TABLE[char10];
-
-        result.lo = (result.lo & ~(0xFULL << 60)) | ((u64)(new_char10 & 0xF) << 60);
-        result.hi = (result.hi & ~0x3ULL) | (new_char10 >> 4);
+        u8 sixbit = ps_get_mid(lo, hi);
+        sixbit = TO_LOWER_TABLE[sixbit];
+        ps_set_mid(&lo, &hi, sixbit);
     }
 
     // Process characters 11-19 in hi
-    for (u8 i = 11; i < len; i++) {
-        const u8 pos = i - 11;
-        const u8 shift = pos * 6 + 2;
-        const u8 sixbit = (ps.hi >> shift) & 0x3F;
-        const u8 new_sixbit = TO_LOWER_TABLE[sixbit];
-
-        result.hi &= ~(0x3FULL << shift);
-        result.hi |= (u64)new_sixbit << shift;
+    for (u8 i = 0, l = len - 11; i < l; i++) {
+        u8 sixbit = ps_get_hi(hi, i);
+        sixbit = TO_LOWER_TABLE[sixbit];
+        ps_set_hi(&hi, i, sixbit);
     }
 
     // Clear CASE_SENSITIVE flag since we're now lowercase
     const u8 flags = ps_flags(ps) & ~PACKED_FLAG_CASE_SENSITIVE;
     const u8 metadata = ps_pack_metadata(len, flags);
-    ps_insert_metadata(&result.hi, metadata);
+    ps_insert_metadata(&hi, metadata);
 
-    return result;
+    return (PackedString){ .lo=lo, .hi=hi };
 }
 
 PackedString ps_to_upper(const PackedString ps) {
-    PackedString result = ps;
     const u8 len = ps_length(ps);
+    u64 lo = ps.lo, hi = ps.hi;
 
     // Process characters in lo (0-9)
-    for (u8 i = 0; i < len && i < 10; i++) {
-        const u8 sixbit = (ps.lo >> (i * 6)) & 0x3F;
-        const u8 new_sixbit = TO_UPPER_TABLE[sixbit];
-
-        result.lo &= ~(0x3FULL << (i * 6));
-        result.lo |= (u64)new_sixbit << (i * 6);
+    for (u8 i = 0; i < 10 && i < len; i++) {
+        u8 sixbit = ps_get_lo(lo, i);
+        sixbit = TO_UPPER_TABLE[sixbit];
+        ps_set_lo(&lo, i, sixbit);
     }
 
-    // Process character 10 if needed
+    // Process character 10 if exist
     if (len > 10) {
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-        const u8 new_char10 = TO_UPPER_TABLE[char10];
-
-        result.lo = (result.lo & ~(0xFULL << 60)) | ((u64)(new_char10 & 0xF) << 60);
-        result.hi = (result.hi & ~0x3ULL) | (new_char10 >> 4);
+        u8 sixbit = ps_get_mid(lo, hi);
+        sixbit = TO_UPPER_TABLE[sixbit];
+        ps_set_mid(&lo, &hi, sixbit);
     }
 
     // Process characters 11-19 in hi
-    for (u8 i = 11; i < len; i++) {
-        const u8 pos = i - 11;
-        const u8 shift = pos * 6 + 2;
-        const u8 sixbit = (ps.hi >> shift) & 0x3F;
-        const u8 new_sixbit = TO_UPPER_TABLE[sixbit];
-
-        result.hi &= ~(0x3FULL << shift);
-        result.hi |= (u64)new_sixbit << shift;
+    for (u8 i = 0, l = len - 11; i < l; i++) {
+        u8 sixbit = ps_get_hi(hi, i);
+        sixbit = TO_UPPER_TABLE[sixbit];
+        ps_set_hi(&hi, i, sixbit);
     }
 
     // Set CASE_SENSITIVE flag since we're preserving uppercase
     const u8 flags = ps_flags(ps) | PACKED_FLAG_CASE_SENSITIVE;
     const u8 metadata = ps_pack_metadata(len, flags);
-    ps_insert_metadata(&result.hi, metadata);
+    ps_insert_metadata(&hi, metadata);
 
-    return result;
+    return (PackedString){ .lo=lo, .hi=hi };
 }
 
 // ============================================================================
@@ -849,7 +790,7 @@ u32 ps_hash32(const PackedString ps) {
     combined *= 0xc4ceb9fe1a85ec53ULL;
     combined ^= combined >> 33;
 
-    return (u32)combined ^ ((u32)(combined >> 32));
+    return (u32)combined ^ (u32)(combined >> 32);
 }
 
 u64 ps_hash64(const PackedString ps) {
@@ -978,7 +919,7 @@ i32 psd_hex(const PackedString ps, char* buffer) {
     return len;
 }
 
-#define BIT($) ($) & 1 ? '1' : '0'
+#define BIT(c) (c) & 1 ? '1' : '0'
 
 i32 psd_binary(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
@@ -1287,7 +1228,7 @@ i32 psd_inspect(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     if (!ps_valid(ps)) {
-        const i32 len = snprintf(buffer, 64,
+        const i32 len = snprintf(buffer, 32,
             "PackedString<INVALID>");
         return len;
     }
@@ -1304,7 +1245,7 @@ i32 psd_inspect(const PackedString ps, char* buffer) {
     if (flags & PACKED_FLAG_STARTS_WITH_DIGIT) flag_chars[1] = 'D';
     if (flags & PACKED_FLAG_CONTAINS_SPECIAL) flag_chars[2] = 'S';
 
-    const i32 length = snprintf(buffer, 128,
+    const i32 length = snprintf(buffer, 64,
         "PackedString<\"%s\" len=%u flags=%s>",
         str_buf, len, flag_chars);
 

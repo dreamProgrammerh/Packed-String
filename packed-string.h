@@ -256,6 +256,18 @@ static inline bool ps_equal(const PackedString a, const PackedString b) {
 }
 
 /**
+ * Equality comparison ignoring metadata (case-sensitive).
+ *
+ * @param a First packed string
+ * @param b Second packed string
+ * @return true if equal ignoring metadata
+ */
+static inline bool ps_equal_nometa(const PackedString a, const PackedString b) {
+    const u64 mask = 0x00FFFFFFFFFFFFFFULL;
+    return a.lo == b.lo && (a.hi & mask) == (b.hi & mask);
+}
+
+/**
  * Case-insensitive equality.
  * Fast if both strings have CASE_SENSITIVE=0.
  * 
