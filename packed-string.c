@@ -193,7 +193,7 @@ static inline bool ps_is_at(
     // Entirely inside hi
     if (start >= 64) {
         const u32 shift = start - 64;
-        const u64 mask  = (bits == 64) ? ~0ULL : ((1ULL << bits) - 1);
+        const u64 mask  = (1ULL << bits) - 1;
         return ((hi1 >> shift) & mask) == (lo2 & mask);
     }
 
@@ -300,8 +300,8 @@ PackedString ps_scan(const PackedString ps) {
         const u8 sixbit = ps_get_lo(ps.lo, i);
 
         if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+        else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
     }
 
     // Process character 10 if exist
@@ -309,8 +309,8 @@ PackedString ps_scan(const PackedString ps) {
         const u8 sixbit = ps_get_mid(ps.lo, ps.hi);
 
         if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+        else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
     }
 
     // Process characters 11-19 in hi
@@ -318,8 +318,8 @@ PackedString ps_scan(const PackedString ps) {
         const u8 sixbit = ps_get_hi(ps.hi, i);
 
         if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+        else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
     }
 
     u64 hi = ps.hi;
@@ -332,16 +332,15 @@ PackedString ps_pack(const char* str) {
 
     u64 lo = 0, hi = 0;
     u8 length = 0, flags = 0;
-    bool has_upper = false, has_digit = false, has_special = false;
 
     // Scan and analyze string
     while (str[length] && length < PACKED_STRING_MAX_LEN) {
         const char c = str[length];
 
         // Track information
-        if ('0' <= c && c <= '9') has_digit = true;
-        if ('A' <= c && c <= 'Z') has_upper = true;
-        if (c == '_' || c == '$') has_special = true;
+        if ('A' <= c && c <= 'Z') flags |= PACKED_FLAG_CASE_SENSITIVE;
+        else if ('0' <= c && c <= '9') flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        else if (c == '_' || c == '$') flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
         const u8 sixbit = ps_char_to_sixbit(c);
         if (sixbit == UINT8_MAX) {
@@ -359,11 +358,6 @@ PackedString ps_pack(const char* str) {
         return PACKED_STRING_INVALID;
     }
 
-    // Set flags
-    if (has_upper) flags |= PACKED_FLAG_CASE_SENSITIVE;
-    if (has_digit) flags |= PACKED_FLAG_CONTAINS_DIGIT;
-    if (has_special) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
-
     // Insert metadata into hi
     const u8 metadata = ps_pack_metadata(length, flags);
     ps_insert_metadata(&hi, metadata);
@@ -376,12 +370,11 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
         return PACKED_STRING_INVALID;
 
     u64 lo = 0, hi = 0;
+    u8 new_flags = 0;
     const bool
         cannot_have_upper = (flags & PACKED_FLAG_CASE_SENSITIVE) == 0,
         cannot_have_digit = (flags & PACKED_FLAG_CONTAINS_DIGIT) == 0,
         cannot_have_special = (flags & PACKED_FLAG_CONTAINS_SPECIAL) == 0;
-
-    bool has_upper = false, has_digit = false, has_special = false;
 
     for (u8 i = 0; i < length; i++) {
         char c = str[i];
@@ -391,9 +384,9 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
             is_special = c == '_' || c == '$';
 
         // Track information
-        if (is_digit) has_digit = true;
-        if (is_upper) has_upper = true;
-        if (is_special) has_special = true;
+        if (is_upper) new_flags |= PACKED_FLAG_CASE_SENSITIVE;
+        else if (is_digit) new_flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        else if (is_special) new_flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
         // Apply case folding if not case-sensitive
         if (cannot_have_upper && is_upper)
@@ -412,13 +405,6 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
 
         ps_set_n_sixbit(&lo, &hi, i, sixbit);
     }
-
-    u8 new_flags = 0;
-
-    // Set flags
-    if (has_upper) new_flags |= PACKED_FLAG_CASE_SENSITIVE;
-    if (has_digit) new_flags |= PACKED_FLAG_CONTAINS_DIGIT;
-    if (has_special) new_flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
     // Insert metadata
     const u8 metadata = ps_pack_metadata(length, new_flags);
@@ -455,9 +441,9 @@ i32 ps_unpack_ex(const PackedString ps, char* buffer, const u8 length, const u8 
     for (u8 i = 0; i < length; i++) {
         u8 sixbit = ps_get_n_sixbit(ps.lo, ps.hi, i);
 
-        if (cannot_have_upper) sixbit = TO_LOWER_TABLE[sixbit];
         if (cannot_have_digit && sixbit <= 9) continue;
         if (cannot_have_special && (sixbit == 62 || sixbit == 63)) continue;
+        if (cannot_have_upper) sixbit = TO_LOWER_TABLE[sixbit];
 
         buffer[len++] = ps_sixbit_to_char(sixbit);
     }
