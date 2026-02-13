@@ -84,7 +84,7 @@ static inline void ps_shr128(u64 *restrict lo, u64 *restrict hi, const u8 shift)
     if (shift < 64) {
         *lo = *lo >> shift | *hi << (64 - shift);
         *hi >>= shift;
-    } else if (shift < 128) {
+    } else {
         *lo = *hi >> (shift - 64);
         *hi = 0;
     }
@@ -335,6 +335,27 @@ static inline void ps_fill(
 }
 
 // ============================================================================
+// STATIC
+// ============================================================================
+
+u8 ps_char(const char c) {
+    if (c == '0') return 0;
+    const u8 r = PS_CHAR_TO_SIXBIT[(u8)c];
+    if (r == 0) return UINT8_MAX;
+    return r;
+}
+
+char ps_six(const u8 six) {
+    if (six >= 64) return '?';
+    return PS_SIXBIT_TO_CHAR[six];
+}
+
+bool ps_alphabet(const char c) {
+    if (c == '0') return true;
+    return PS_CHAR_TO_SIXBIT[(u8)c] != 0;
+}
+
+// ============================================================================
 // CORE IMPLEMENTATION
 // ============================================================================
 
@@ -508,35 +529,33 @@ i32 ps_unpack_ex(const PackedString ps, char* buffer, const u8 length, const u8 
     return len;
 }
 
-u8 ps_sixbit_at(const PackedString ps, const u8 index) {
+u8 ps_set(PackedString* ps, const u8 index, const u8 sixbit) {
+    const u8 length = ps_length(*ps);
+    if (index >= length) return UINT8_MAX;
+
+    ps_set_n_sixbit(&ps->lo, &ps->hi, index, sixbit);
+    return sixbit;
+}
+
+u8 ps_at(const PackedString ps, const u8 index) {
     const u8 length = ps_length(ps);
     if (index >= length) return UINT8_MAX;
 
     return ps_get_n_sixbit(ps.lo, ps.hi, index);
 }
 
-char ps_char_at(const PackedString ps, const u8 index) {
+u8 ps_first(const PackedString ps) {
     const u8 length = ps_length(ps);
-    if (index >= length) return '\0';
+    if (length == 0) return UINT8_MAX;
 
-    const u8 sixbit = ps_get_n_sixbit(ps.lo, ps.hi, index);
-    return ps_sixbit_to_char(sixbit);
+    return ps.lo & 0x3F;
 }
 
-char ps_first_char(const PackedString ps) {
+u8 ps_last(const PackedString ps) {
     const u8 length = ps_length(ps);
-    if (length == 0) return '\0';
+    if (length == 0) return UINT8_MAX;
 
-    const u8 sixbit = ps.lo & 0x3F;
-    return ps_sixbit_to_char(sixbit);
-}
-
-char ps_last_char(const PackedString ps) {
-    const u8 length = ps_length(ps);
-    if (length == 0) return '\0';
-
-    const u8 sixbit = ps_get_n_sixbit(ps.lo, ps.hi, length - 1);
-    return ps_sixbit_to_char(sixbit);
+    return ps_get_n_sixbit(ps.lo, ps.hi, length - 1);
 }
 
 // ============================================================================
@@ -896,44 +915,40 @@ PackedString ps_pad_center(const PackedString ps, const u8 sixbit, const u8 leng
 // SEARCH OPERATIONS
 // ============================================================================
 
-i8 ps_find_char(const PackedString ps, const char c) {
-    const u8 target_sixbit = ps_char_to_sixbit(c);
-    if (target_sixbit == UINT8_MAX) return -1;
+i8 ps_find_six(const PackedString ps, const u8 sixbit) {
+    if (sixbit >= 64) return -1;
 
     const u8 len = ps_length(ps);
     if (len == 0) return -1;
 
-    return ps_find(ps.lo, ps.hi, 0, target_sixbit);
+    return ps_find(ps.lo, ps.hi, 0, sixbit);
 }
 
-i8 ps_find_char_from(const PackedString ps, const char c, const u8 start) {
-    const u8 target_sixbit = ps_char_to_sixbit(c);
-    if (target_sixbit == UINT8_MAX) return -1;
+i8 ps_find_from_six(const PackedString ps, const u8 sixbit, const u8 start) {
+    if (sixbit >= 64) return -1;
 
     const u8 len = ps_length(ps);
     if (start >= len) return -1;
 
-    return ps_find(ps.lo, ps.hi, start, target_sixbit);
+    return ps_find(ps.lo, ps.hi, start, sixbit);
 }
 
-i8 ps_find_last_char(const PackedString ps, const char c) {
-    const u8 target_sixbit = ps_char_to_sixbit(c);
-    if (target_sixbit == UINT8_MAX) return -1;
+i8 ps_find_last_six(const PackedString ps, const u8 sixbit) {
+    if (sixbit >= 64) return -1;
 
     const u8 len = ps_length(ps);
     if (len == 0) return -1;
 
-    return ps_reverse_find(ps.lo, ps.hi, len - 1, target_sixbit);
+    return ps_reverse_find(ps.lo, ps.hi, len - 1, sixbit);
 }
 
-bool ps_contains_char(const PackedString ps, const char c) {
-    const u8 target_sixbit = ps_char_to_sixbit(c);
-    if (target_sixbit == UINT8_MAX) return false;
+bool ps_contains_six(const PackedString ps, const u8 sixbit) {
+    if (sixbit >= 64) return false;
 
     const u8 len = ps_length(ps);
     if (len == 0) return false;
 
-    return ps_reverse_find(ps.lo, ps.hi, len - 1, target_sixbit) != -1;
+    return ps_reverse_find(ps.lo, ps.hi, len - 1, sixbit) != -1;
 }
 
 bool ps_contains(const PackedString ps, const PackedString pat) {
@@ -1148,8 +1163,8 @@ i32 psd_info(const PackedString ps, char* buffer) {
     // Get character breakdown
     char chars_buf[128] = "";
     for (u8 i = 0; i < length; i++) {
-        const char c = ps_char_at(ps, i);
-        const u8 sixbit = ps_sixbit_at(ps, i);
+        const u8 sixbit = ps_at(ps, i);
+        const char c = ps_char(sixbit);
         snprintf(chars_buf + strlen(chars_buf),
                  sizeof(chars_buf) - strlen(chars_buf),
                  "%c(%02u) ", c, sixbit);
@@ -1260,7 +1275,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " char:");
     for (u8 i = 0; i < 10; i++) {
         if (i < len) {
-            const char c = ps_char_at(ps, i);
+            const char c = ps_char(ps_at(ps, i));
             ptr += sprintf(ptr, "  %c", c);
         } else {
             ptr += sprintf(ptr, "  .");
@@ -1269,7 +1284,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
 
     ptr += sprintf(ptr, " | ");
     if (len > 10) {
-        const char c10 = ps_char_at(ps, 10);
+        const char c10 = ps_char(ps_at(ps, 10));
         ptr += sprintf(ptr, " %c", c10);
     } else {
         ptr += sprintf(ptr, " .");
@@ -1278,7 +1293,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " |");
     for (u8 i = 11; i < 20; i++) {
         if (i < len) {
-            const char c = ps_char_at(ps, i);
+            const char c = ps_char(ps_at(ps, i));
             ptr += sprintf(ptr, "  %c", c);
         } else {
             ptr += sprintf(ptr, "  .");

@@ -64,6 +64,29 @@ typedef struct packed_string {
 #define PACKED_FLAG_CONTAINS_SPECIAL    (1u << 2)   // Bit 2: 1=contains '_' or '$'
 
 // ============================================================================
+// STATIC
+// ============================================================================
+
+/**
+ * Convert ASCII character to sixbit character.
+ *
+ * @param c Character to be converted
+ * @return Sixbit Character or UINT8_MAX if not valid
+ */
+u8 ps_char(char c);
+
+/**
+ * Convert sixbit character to ASCII character .
+ *
+ * @param six Sixbit character to be converted
+ * @return ASCII Character or '?' if not valid
+ */
+char ps_six(u8 six);
+
+/** Check if char in packed string alphabet */
+bool ps_alphabet(char c);
+
+// ============================================================================
 // CORE OPERATIONS
 // ============================================================================
 
@@ -214,6 +237,16 @@ static inline bool ps_contains_special(const PackedString ps) {
 // ============================================================================
 
 /**
+ * Set sixbit at position (0-based).
+ *
+ * @param ps Packed string
+ * @param index Sixbit position (0-19)
+ * @param sixbit New sixbit
+ * @return Sixbit or UINT8_MAX if out of bound
+ */
+u8 ps_set(PackedString* ps, u8 index, u8 sixbit);
+
+/**
  * Get sixbit at position (0-based).
  * Returns UINT8_MAX if index out of bounds.
  *
@@ -221,35 +254,25 @@ static inline bool ps_contains_special(const PackedString ps) {
  * @param index Sixbit position (0-19)
  * @return Sixbit or UINT8_MAX if out of bound
  */
-u8 ps_sixbit_at(PackedString ps, u8 index);
+u8 ps_at(PackedString ps, u8 index);
 
 /**
- * Get character at position (0-based).
- * Returns '\0' if index out of bounds.
+ * Get first sixbit character.
+ * Faster than ps_at(ps, 0) for first char.
  * 
  * @param ps Packed string
- * @param index Character position (0-19)
- * @return Character or '\0' if out of bound
+ * @return First sixbit character or UINT8_MAX if empty
  */
-char ps_char_at(PackedString ps, u8 index);
+u8 ps_first(PackedString ps);
 
 /**
- * Get first character.
- * Faster than ps_char_at(ps, 0) for first char.
- * 
- * @param ps Packed string
- * @return First character or '\0'
- */
-char ps_first_char(PackedString ps);
-
-/**
- * Get last character.
- * Same as ps_char_at(ps, len-1) for last char.
+ * Get last sixbit character.
+ * Same as ps_at(ps, len-1) for last char.
  *
  * @param ps Packed string
- * @return Last character or '\0'
+ * @return Last sixbit character or UINT8_MAX if empty
  */
-char ps_last_char(PackedString ps);
+u8 ps_last(PackedString ps);
 
 // ============================================================================
 // COMPARISON OPERATIONS
@@ -461,41 +484,41 @@ PackedString ps_pad_center(PackedString ps, u8 sixbit, u8 length);
 // ============================================================================
 
 /**
- * Find character in packed string.
+ * Find sixbit character in packed string.
  * 
  * @param ps Packed string
- * @param c Character to find
+ * @param sixbit Sixbit character to find
  * @return Index of first occurrence, or -1 if not found
  */
-i8 ps_find_char(PackedString ps, char c);
+i8 ps_find_six(PackedString ps, u8 sixbit);
 
 /**
- * Find character starting from position.
+ * Find sixbit character starting from position.
  * 
  * @param ps Packed string
- * @param c Character to find
+ * @param sixbit Sixbit character to find
  * @param start Starting position
  * @return Index of occurrence, or -1 if not found
  */
-i8 ps_find_char_from(PackedString ps, char c, u8 start);
+i8 ps_find_from_six(PackedString ps, u8 sixbit, u8 start);
 
 /**
- * Find last occurrence of character.
+ * Find sixbit last occurrence of character.
  * 
  * @param ps Packed string
- * @param c Character to find
+ * @param sixbit Sixbit character to find
  * @return Index of last occurrence, or -1 if not found
  */
-i8 ps_find_last_char(PackedString ps, char c);
+i8 ps_find_last_six(PackedString ps, u8 sixbit);
 
 /**
- * Check if string contains character.
+ * Check if string contains sixbit character.
  * 
  * @param ps Packed string
- * @param c Character to check
+ * @param sixbit Sixbit character to check
  * @return true if character found
  */
-bool ps_contains_char(PackedString ps, char c);
+bool ps_contains_six(PackedString ps, u8 sixbit);
 
 /**
  * Check if string contains pattern.
@@ -534,7 +557,7 @@ u64 ps_hash64(PackedString ps);
  */
 static inline u32 ps_hash_for_table(const PackedString ps) {
     const u32 h = ps_hash32(ps);
-    return h ^ (ps_length(ps) << 24);
+    return h ^ ps_length(ps) << 24;
 }
 
 // ============================================================================
