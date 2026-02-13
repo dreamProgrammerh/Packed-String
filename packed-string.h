@@ -370,6 +370,24 @@ bool ps_starts_with_at(PackedString ps, PackedString prefix, u8 start);
 bool ps_ends_with_at(PackedString ps, PackedString suffix, u8 end);
 
 /**
+ * Move start of string to specified start.
+ *
+ * @param ps Packed string
+ * @param start Starting char
+ * @return Packed string starting at start char
+ */
+PackedString ps_skip(PackedString ps, u8 start);
+
+/**
+ * Truncated a string to length.
+ *
+ * @param ps Packed string
+ * @param length Desired length
+ * @return Truncated packed string to length
+ */
+PackedString ps_trunc(PackedString ps, u8 length);
+
+/**
  * Get substring as new packed string.
  * Returns empty string if start ≥ length.
  * 

@@ -85,6 +85,18 @@ static inline void ps_mask(u64 *restrict lo, u64 *restrict hi, const u8 start, c
     *hi &= hi_mask;
 }
 
+static inline void ps_limit(u64 *restrict lo, u64 *restrict hi, const u8 length) {
+    const u32 bit_len  = (u32)length * 6;
+
+    if (bit_len < 64) {
+        *lo &= (1ULL << bit_len) - 1ULL;
+    } else /* if bit_len > 64 */ {
+        *hi &= (1ULL << (bit_len - 64)) - 1ULL;
+    }
+    // Note: bit_len cannot be 64,
+    //  because 64 is not divisible by 6
+}
+
 static inline u8 ps_get_mid(const u64 lo, const u64 hi) {
     return (hi & 0x3) << 4 | lo >> 60 & 0xF;
 }
@@ -647,6 +659,30 @@ bool ps_ends_with_at(const PackedString ps, const PackedString suffix, const u8 
     );
 }
 
+PackedString ps_skip(const PackedString ps, const u8 start) {
+    if (start == 0) return ps;
+
+    const u8 len = ps_length(ps);
+    if (start > len) return ps_empty();
+
+    u64 lo = ps.lo, hi = ps.hi & 0x00FFFFFFFFFFFFFFFFULL;
+    ps_shr(&lo, &hi, start * 6);
+
+    ps_insert_metadata(&hi, ps_pack_metadata(len - start, 0));
+    return (PackedString){ .lo=lo, .hi=hi };
+}
+
+PackedString ps_trunc(const PackedString ps, const u8 length) {
+    if (length == 0) return ps_empty();
+    if (length >= ps_length(ps)) return ps;
+
+    u64 lo = ps.lo, hi = ps.hi;
+    ps_limit(&lo, &hi, length);
+
+    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    return (PackedString){ .lo=lo, .hi=hi };
+}
+
 PackedString ps_substring(const PackedString ps, const u8 start, const u8 length) {
     const u8 total = ps_length(ps);
 
@@ -656,17 +692,11 @@ PackedString ps_substring(const PackedString ps, const u8 start, const u8 length
     u64 lo = ps.lo, hi = ps.hi;
 
     const u32 bit_start = (u32)start * 6;
-    const u32 bit_len   = (u32)length * 6;
 
     if (bit_start != 0)
         ps_shr(&lo, &hi, bit_start);
 
-    if (bit_len < 64) {
-        lo &= (1ULL << bit_len) - 1ULL;
-    } else /* if bit_len > 64 */ {
-        hi &= (1ULL << (bit_len - 64)) - 1ULL;
-    }
-    // bit_len cannot be 64 because 64 % 6 != 0
+    ps_limit(&lo, &hi, length);
 
     const u8 meta = ps_pack_metadata(length, 0);
     ps_insert_metadata(&hi, meta);
