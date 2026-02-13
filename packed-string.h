@@ -426,6 +426,36 @@ PackedString ps_to_lower(PackedString ps);
  */
 PackedString ps_to_upper(PackedString ps);
 
+/**
+ * Pad a string to left until length with sixbit.
+ *
+ * @param ps Packed string
+ * @param sixbit Sixbit char
+ * @param length Max length
+ * @return Left padded packed string
+ */
+PackedString ps_pad_left(PackedString ps, u8 sixbit, u8 length);
+
+/**
+ * Pad a string to right until length with sixbit.
+ *
+ * @param ps Packed string
+ * @param sixbit Sixbit char
+ * @param length Max length
+ * @return Right padded packed string
+ */
+PackedString ps_pad_right(PackedString ps, u8 sixbit, u8 length);
+
+/**
+ * Pad a string to center until length with sixbit.
+ *
+ * @param ps Packed string
+ * @param sixbit Sixbit char
+ * @param length Max length
+ * @return Center padded packed string
+ */
+PackedString ps_pad_center(PackedString ps, u8 sixbit, u8 length);
+
 // ============================================================================
 // SEARCH OPERATIONS
 // ============================================================================

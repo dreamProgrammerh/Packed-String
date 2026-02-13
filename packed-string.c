@@ -70,6 +70,26 @@ static inline void ps_shr(u64 *restrict lo, u64 *restrict hi, const u8 shift) {
     *hi >>= shift;
 }
 
+static inline void ps_shl128(u64 *restrict lo, u64 *restrict hi, const u8 shift) {
+    if (shift <= 64) {
+        *hi = *hi << shift | *lo >> (64 - shift);
+        *lo <<= shift;
+    } else {
+        *hi = *lo << (shift - 64);
+        *lo = 0;
+    }
+}
+
+static inline void ps_shr128(u64 *restrict lo, u64 *restrict hi, const u8 shift) {
+    if (shift < 64) {
+        *lo = *lo >> shift | *hi << (64 - shift);
+        *hi >>= shift;
+    } else if (shift < 128) {
+        *lo = *hi >> (shift - 64);
+        *hi = 0;
+    }
+}
+
 static inline void ps_mask(u64 *restrict lo, u64 *restrict hi, const u8 start, const u8 length) {
     const u8 lo_len = 64 - start;
     const u8 hi_len = length - lo_len;
@@ -148,12 +168,24 @@ static inline void ps_set_n_sixbit(u64 *restrict lo, u64 *restrict hi, const u8 
         *lo &= ~(0xFULL << 60);
         *hi &= ~0x3ULL;
         *lo |= (u64)(sixbit & 0xF) << 60;
-        *hi |= sixbit >> 4 & 0x3;
+        *hi |= sixbit >> 4;
     } else {
         // n > 10 (11-19)
         const u8 shift = (n - 11) * 6 + 2;
         *hi &= ~(0x3FULL << shift);
         *hi |= (u64)sixbit << shift;
+    }
+}
+
+static inline void ps_write_sixbit(u64 *restrict lo, u64 *restrict hi,
+    const u8 sixbit, const u8 bitpos) {
+    if (bitpos < 60) {
+        *lo |= (u64)sixbit << bitpos;
+    } else if (bitpos == 60) {
+        *lo |= (u64)(sixbit & 0xF) << 60;
+        *hi |= sixbit >> 4;
+    } else {
+        *hi |= (u64)sixbit << (bitpos - 64);
     }
 }
 
@@ -290,6 +322,18 @@ static inline i8 ps_reverse_find(
     }
 }
 
+static inline void ps_fill(
+    u64 *restrict lo, u64 *restrict hi,
+    const u8 sixbit, const u8 length
+) {
+    const u8 bit_len = length * 6;
+    *lo = *hi = 0;
+
+    for (u8 pos=0; pos < bit_len; pos+=6) {
+        ps_write_sixbit(lo, hi, sixbit, pos);
+    }
+}
+
 // ============================================================================
 // CORE IMPLEMENTATION
 // ============================================================================
@@ -360,7 +404,7 @@ PackedString ps_pack(const char* str) {
             return PACKED_STRING_INVALID;
         }
 
-        ps_set_n_sixbit(&lo, &hi, length, sixbit);
+        ps_write_sixbit(&lo, &hi, sixbit, length * 6);
         length++;
     }
 
@@ -415,7 +459,7 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
             // Invalid character, return invalid
             return PACKED_STRING_INVALID;
 
-        ps_set_n_sixbit(&lo, &hi, i, sixbit);
+        ps_write_sixbit(&lo, &hi, sixbit, i * 6);
     }
 
     // Insert metadata
@@ -666,7 +710,7 @@ PackedString ps_skip(const PackedString ps, const u8 start) {
     if (start > len) return ps_empty();
 
     u64 lo = ps.lo, hi = ps.hi & 0x00FFFFFFFFFFFFFFFFULL;
-    ps_shr(&lo, &hi, start * 6);
+    ps_shr128(&lo, &hi, start * 6);
 
     ps_insert_metadata(&hi, ps_pack_metadata(len - start, 0));
     return (PackedString){ .lo=lo, .hi=hi };
@@ -694,7 +738,7 @@ PackedString ps_substring(const PackedString ps, const u8 start, const u8 length
     const u32 bit_start = (u32)start * 6;
 
     if (bit_start != 0)
-        ps_shr(&lo, &hi, bit_start);
+        ps_shr128(&lo, &hi, bit_start);
 
     ps_limit(&lo, &hi, length);
 
@@ -713,7 +757,7 @@ PackedString ps_concat(const PackedString a, const PackedString b) {
     const u8 a_bits = len_a * 6;
     u64 lo = b.lo, hi = b.hi;
 
-    ps_shl(&lo, &hi, a_bits);
+    ps_shl128(&lo, &hi, a_bits);
 
     lo |= a.lo;
     hi |= a.hi;
@@ -789,6 +833,62 @@ PackedString ps_to_upper(const PackedString ps) {
     const u8 metadata = ps_pack_metadata(len, flags);
     ps_insert_metadata(&hi, metadata);
 
+    return (PackedString){ .lo=lo, .hi=hi };
+}
+
+PackedString ps_pad_left(const PackedString ps, const u8 sixbit, const u8 length) {
+    const u8 len = ps_length(ps);
+    if (len >= length) return ps;
+
+    const u8 pad_len = length - len;
+    u64 pad_lo, pad_hi, lo = ps.lo, hi = ps.hi;
+
+    ps_fill(&pad_lo, &pad_hi, sixbit, pad_len);
+    ps_shl128(&lo, &hi, pad_len * 6);
+
+    lo |= pad_lo;
+    hi |= pad_hi;
+
+    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    return (PackedString){ .lo=lo, .hi=hi };
+}
+
+PackedString ps_pad_right(const PackedString ps, const u8 sixbit, const u8 length) {
+    const u8 len = ps_length(ps);
+    if (len >= length) return ps;
+
+    const u8 pad_len = length - len;
+    u64 pad_lo, pad_hi, lo = ps.lo, hi = ps.hi;
+
+    ps_fill(&pad_lo, &pad_hi, sixbit, pad_len);
+    ps_shl128(&pad_lo, &pad_hi, len * 6);
+
+    lo |= pad_lo;
+    hi |= pad_hi;
+
+    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    return (PackedString){ .lo=lo, .hi=hi };
+}
+
+PackedString ps_pad_center(const PackedString ps, const u8 sixbit, const u8 length) {
+    const u8 len = ps_length(ps);
+    if (len >= length) return ps;
+
+    const u8 pad_len = length - len;
+    const u8 padl_len = pad_len / 2;
+    const u8 padr_len = pad_len - padl_len;
+    u64 padl_lo, padl_hi, padr_lo, padr_hi,
+        lo = ps.lo, hi = ps.hi;
+
+    ps_fill(&padr_lo, &padr_hi, sixbit, padr_len);
+    ps_fill(&padl_lo, &padl_hi, sixbit, padl_len);
+    ps_shl128(&lo, &hi, padl_len * 6);
+    ps_shl128(&padr_lo, &padr_hi, (padl_len + len) * 6);
+
+    lo |= padl_lo | padr_lo;
+    hi |= padl_hi | padr_hi;
+
+    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
     return (PackedString){ .lo=lo, .hi=hi };
 }
 
