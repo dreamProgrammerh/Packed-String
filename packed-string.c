@@ -997,6 +997,63 @@ u64 ps_hash64(const PackedString ps) {
     return h;
 }
 
+PackedString ps_lock(const PackedString ps, const PackedString key) {
+    const u64 mask_hi = 0x07FFFFFFFFFFFFFFULL;  // Lower 59 bits of hi
+    u64 lo = ps.lo, hi = ps.hi;
+
+    const u8 rotate = ps_length(key);
+    if (rotate == 0) return ps_empty();
+
+    /* Save last 5 bits (length) */
+    const u64 save = hi & 0xF800000000000000ULL;
+    const u64 hi_masked = hi & mask_hi;
+    const u64 lo_orig = lo;
+
+    // Left rotate 123 bits by rotate
+    lo = (lo << rotate) | (hi_masked >> (59 - rotate));
+    hi = (((hi_masked << rotate) & mask_hi) | (lo_orig >> (64 - rotate)));
+
+    // Restore save
+    hi |= save;
+
+    /* Xor with key */
+    lo ^= key.lo;
+    hi ^= key.hi & mask_hi;
+
+    return (PackedString){ .lo = lo, .hi = hi };
+}
+
+PackedString ps_unlock(const PackedString ps, const PackedString key) {
+    const u64 mask_hi = 0x07FFFFFFFFFFFFFFULL;  // Lower 59 bits of hi
+    u64 lo = ps.lo, hi = ps.hi;
+
+    const u8 rotate = ps_length(key);
+    if (rotate == 0) return ps_empty();
+
+    /* First XOR with key */
+    lo ^= key.lo;
+    hi ^= (key.hi & mask_hi);
+
+    /* Save last 5 bits (length) */
+    const u64 save = hi & 0xF800000000000000ULL;
+    const u64 hi_masked = hi & mask_hi; // rotated 59-bit part
+
+    // Right rotate (Reverse the left rotate)
+    // Extract components
+    const u64 H_high = lo & ((1ULL << rotate) - 1);         // top 'rotate' bits of original hi
+    const u64 H_low = (hi_masked >> rotate) & ((1ULL << (59 - rotate)) - 1);
+    hi = (H_high << (59 - rotate)) | H_low;
+
+    const u64 L_high = hi_masked & ((1ULL << rotate) - 1);  // top 'rotate' bits of original lo
+    const u64 L_low = lo >> rotate;                         // low (64 - rotate) bits of original lo
+    lo = (L_high << (64 - rotate)) | L_low;
+
+    // Restore save
+    hi |= save;
+
+    return (PackedString){ .lo = lo, .hi = hi };
+}
+
 // ============================================================================
 // VALIDATION & UTILITIES
 // ============================================================================
@@ -1164,7 +1221,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
     char chars_buf[128] = "";
     for (u8 i = 0; i < length; i++) {
         const u8 sixbit = ps_at(ps, i);
-        const char c = ps_char(sixbit);
+        const char c = ps_six(sixbit);
         snprintf(chars_buf + strlen(chars_buf),
                  sizeof(chars_buf) - strlen(chars_buf),
                  "%c(%02u) ", c, sixbit);
@@ -1275,7 +1332,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " char:");
     for (u8 i = 0; i < 10; i++) {
         if (i < len) {
-            const char c = ps_char(ps_at(ps, i));
+            const char c = ps_six(ps_at(ps, i));
             ptr += sprintf(ptr, "  %c", c);
         } else {
             ptr += sprintf(ptr, "  .");
@@ -1284,7 +1341,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
 
     ptr += sprintf(ptr, " | ");
     if (len > 10) {
-        const char c10 = ps_char(ps_at(ps, 10));
+        const char c10 = ps_six(ps_at(ps, 10));
         ptr += sprintf(ptr, " %c", c10);
     } else {
         ptr += sprintf(ptr, " .");
@@ -1293,7 +1350,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " |");
     for (u8 i = 11; i < 20; i++) {
         if (i < len) {
-            const char c = ps_char(ps_at(ps, i));
+            const char c = ps_six(ps_at(ps, i));
             ptr += sprintf(ptr, "  %c", c);
         } else {
             ptr += sprintf(ptr, "  .");

@@ -530,7 +530,7 @@ bool ps_contains_six(PackedString ps, u8 sixbit);
 bool ps_contains(PackedString ps, PackedString pat);
 
 // ============================================================================
-// HASHING
+// HASHING & LOCKING
 // ============================================================================
 
 /**
@@ -555,10 +555,28 @@ u64 ps_hash64(PackedString ps);
  * @param ps Packed string
  * @return Combined hash
  */
-static inline u32 ps_hash_for_table(const PackedString ps) {
+static inline u32 ps_table_hash(const PackedString ps) {
     const u32 h = ps_hash32(ps);
     return h ^ ps_length(ps) << 24;
 }
+
+/**
+ * Lock packed string with key to unreadable version.
+ *
+ * @param ps Packed string
+ * @param key Lock Key
+ * @return Locked packed string
+ */
+PackedString ps_lock(PackedString ps, PackedString key);
+
+/**
+ * Unlock locked packed string with key to readable version again.
+ *
+ * @param ps Packed string
+ * @param key Lock Key
+ * @return Normal unlocked packed string if key is correct
+ */
+PackedString ps_unlock(PackedString ps, PackedString key);
 
 // ============================================================================
 // VALIDATION & UTILITIES
