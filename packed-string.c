@@ -290,21 +290,56 @@ PackedString ps_make(const u64 lo, const u64 hi, const u8 length, const u8 flags
     return (PackedString){.lo = lo, .hi = h};
 }
 
+PackedString ps_scan(const PackedString ps) {
+    const u8 len = ps_length(ps);
+
+    u8 flags = 0;
+
+    // Scan characters in lo (0-9)
+    for (u8 i = 0; i < 10 && i < len; i++) {
+        const u8 sixbit = ps_get_lo(ps.lo, i);
+
+        if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+    }
+
+    // Process character 10 if exist
+    if (len > 10) {
+        const u8 sixbit = ps_get_mid(ps.lo, ps.hi);
+
+        if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+    }
+
+    // Process characters 11-19 in hi
+    for (u8 i = 0, l = len - 11; i < l; i++) {
+        const u8 sixbit = ps_get_hi(ps.hi, i);
+
+        if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+        if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+    }
+
+    u64 hi = ps.hi;
+    ps_insert_metadata(&hi, ps_pack_metadata(len, flags));
+    return (PackedString){.lo = ps.lo, .hi = hi};
+}
+
 PackedString ps_pack(const char* str) {
     if (!str) return PACKED_STRING_INVALID;
 
     u64 lo = 0, hi = 0;
-    u8 length = 0;
-    u8 flags = 0;
-    bool has_upper = false;
-    bool start_digit = false;
-    bool has_special = false;
+    u8 length = 0, flags = 0;
+    bool has_upper = false, has_digit = false, has_special = false;
 
     // Scan and analyze string
     while (str[length] && length < PACKED_STRING_MAX_LEN) {
         const char c = str[length];
 
-        // Track case information
+        // Track information
+        if ('0' <= c && c <= '9') has_digit = true;
         if ('A' <= c && c <= 'Z') has_upper = true;
         if (c == '_' || c == '$') has_special = true;
 
@@ -324,27 +359,12 @@ PackedString ps_pack(const char* str) {
         return PACKED_STRING_INVALID;
     }
 
-    start_digit = length > 0 && '0' <= str[0] && str[0] <= '9';
-
     // Set flags
-    if (has_upper) {
-        // Mixed case - preserve it
-        // All uppercase - could be constant
-        flags |= PACKED_FLAG_CASE_SENSITIVE;
-    }
-    // All lowercase gets flag=0 (we'll store as lowercase)
+    if (has_upper) flags |= PACKED_FLAG_CASE_SENSITIVE;
+    if (has_digit) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    if (has_special) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
-    if (start_digit) {
-        // Check first character is digit
-        flags |= PACKED_FLAG_STARTS_WITH_DIGIT;
-    }
-
-    if (has_special) {
-        flags |= PACKED_FLAG_CONTAINS_SPECIAL;
-    }
-
-    // Insert metadata into hi word (bits 60-63 of hi, and we'll use bits 60-67)
-    // Actually, we need 8 bits for metadata, so we'll use top 8 bits of hi
+    // Insert metadata into hi
     const u8 metadata = ps_pack_metadata(length, flags);
     ps_insert_metadata(&hi, metadata);
 
@@ -356,32 +376,60 @@ PackedString ps_pack_ex(const char* str, const u8 length, const u8 flags) {
         return PACKED_STRING_INVALID;
 
     u64 lo = 0, hi = 0;
+    const bool
+        cannot_have_upper = (flags & PACKED_FLAG_CASE_SENSITIVE) == 0,
+        cannot_have_digit = (flags & PACKED_FLAG_CONTAINS_DIGIT) == 0,
+        cannot_have_special = (flags & PACKED_FLAG_CONTAINS_SPECIAL) == 0;
+
+    bool has_upper = false, has_digit = false, has_special = false;
 
     for (u8 i = 0; i < length; i++) {
         char c = str[i];
+        const bool
+            is_digit = '0' <= c && c <= '9',
+            is_upper = 'A' <= c && c <= 'Z',
+            is_special = c == '_' || c == '$';
+
+        // Track information
+        if (is_digit) has_digit = true;
+        if (is_upper) has_upper = true;
+        if (is_special) has_special = true;
 
         // Apply case folding if not case-sensitive
-        c += ('a' - 'A') * (!(flags & PACKED_FLAG_CASE_SENSITIVE) && ('A' <= c && c <= 'Z'));
+        if (cannot_have_upper && is_upper)
+            c += 'a' - 'A';
+
+        if (cannot_have_digit && is_digit)
+            return PACKED_STRING_INVALID;
+
+        if (cannot_have_special && is_special)
+            return PACKED_STRING_INVALID;
 
         const u8 sixbit = ps_char_to_sixbit(c);
-        if (sixbit == UINT8_MAX) {
+        if (sixbit == UINT8_MAX)
             // Invalid character, return invalid
             return PACKED_STRING_INVALID;
-        }
 
         ps_set_n_sixbit(&lo, &hi, i, sixbit);
     }
 
+    u8 new_flags = 0;
+
+    // Set flags
+    if (has_upper) new_flags |= PACKED_FLAG_CASE_SENSITIVE;
+    if (has_digit) new_flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    if (has_special) new_flags |= PACKED_FLAG_CONTAINS_SPECIAL;
+
     // Insert metadata
-    const u8 metadata = ps_pack_metadata(length, flags);
+    const u8 metadata = ps_pack_metadata(length, new_flags);
     ps_insert_metadata(&hi, metadata);
 
     return (PackedString){.lo = lo, .hi = hi};
 }
 
-bool ps_unpack(const PackedString ps, char* buffer) {
+i32 ps_unpack(const PackedString ps, char* buffer) {
     if (!buffer || !ps_valid(ps))
-        return false;
+        return -1;
 
     const u8 length = ps_length(ps);
 
@@ -391,20 +439,31 @@ bool ps_unpack(const PackedString ps, char* buffer) {
     }
 
     buffer[length] = '\0';
-    return true;
+    return length;
 }
 
-bool ps_unpack_ex(const PackedString ps, char* buffer, const u8 length, const u8 flags) {
+i32 ps_unpack_ex(const PackedString ps, char* buffer, const u8 length, const u8 flags) {
     if (!buffer || length > PACKED_STRING_MAX_LEN || !ps_valid(ps))
-        return false;
+        return -1;
 
+    const bool
+        cannot_have_upper = (flags & PACKED_FLAG_CASE_SENSITIVE) == 0,
+        cannot_have_digit = (flags & PACKED_FLAG_CONTAINS_DIGIT) == 0,
+        cannot_have_special = (flags & PACKED_FLAG_CONTAINS_SPECIAL) == 0;
+
+    u8 len = 0;
     for (u8 i = 0; i < length; i++) {
-        const u8 sixbit = ps_get_n_sixbit(ps.lo, ps.hi, i);
-        buffer[i] = ps_sixbit_to_char(sixbit);
+        u8 sixbit = ps_get_n_sixbit(ps.lo, ps.hi, i);
+
+        if (cannot_have_upper) sixbit = TO_LOWER_TABLE[sixbit];
+        if (cannot_have_digit && sixbit <= 9) continue;
+        if (cannot_have_special && (sixbit == 62 || sixbit == 63)) continue;
+
+        buffer[len++] = ps_sixbit_to_char(sixbit);
     }
 
-    buffer[length] = '\0';
-    return true;
+    buffer[len] = '\0';
+    return len;
 }
 
 u8 ps_sixbit_at(const PackedString ps, const u8 index) {
@@ -811,97 +870,14 @@ u64 ps_hash64(const PackedString ps) {
 // VALIDATION & UTILITIES
 // ============================================================================
 
-bool ps_has_digit(const PackedString ps) {
-    // Check starts_with_digit flag first
-    if (ps_starts_with_digit(ps)) return true;
-
-    const u8 len = ps_length(ps);
-
-    // Check digits 0-9 in sixbit values 0-9
-    // Create mask for digits in lo
-    u64 digit_mask_lo = 0;
-    for (i32 digit = 0; digit < 10; digit++) {
-        // Each digit appears in every 6-bit position
-        for (i32 pos = 0; pos < 10; pos++) {
-            digit_mask_lo |= (1ULL << (pos * 6 + digit));
-        }
-    }
-
-    // Check if any digit bits are set in lo
-    for (u8 i = 1; i < len && i < 10; i++) {  // Start from 1 (char 0 already checked)
-        const u8 sixbit = (ps.lo >> (i * 6)) & 0x3F;
-        if (sixbit < 10) return true;  // sixbit 0-9 corresponds to digits
-    }
-
-    // Check character 10
-    if (len > 10) {
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
-        if (char10 < 10) return true;
-    }
-
-    // Check characters 11-19
-    for (u8 i = 11; i < len; i++) {
-        const u8 pos = i - 11;
-        const u8 sixbit = (ps.hi >> (pos * 6 + 2)) & 0x3F;
-        if (sixbit < 10) return true;
-    }
-
-    return false;
-}
-
-bool ps_validate(const PackedString ps) {
-    const u8 length = ps_length(ps);
-    if (length > PACKED_STRING_MAX_LEN) return false;
-
-    // Check that characters beyond length are zero
-    // For lo: bits beyond (length * 6) should be 0
-    if (length <= 10) {
-        const u64 lo_mask = (1ULL << (length * 6)) - 1;
-        if ((ps.lo & ~lo_mask) != 0) return false;
-    }
-    // For length > 10, all of lo is used except maybe part of char10
-    // But we need to check that unused part of char10 is 0
-    // Actually, for length > 10, char10 is fully used
-    // So we just need to check hi bits beyond the used characters
-
-    // For hi: bits beyond used characters should be 0
-    if (length > 10) {
-        const u8 hi_chars = length - 11;  // Characters 11-19
-        const u64 hi_data_mask = ((1ULL << (hi_chars * 6)) - 1) << 2;
-        const u64 hi_clear_mask = hi_data_mask | 0x3ULL;  // Include char10[2 bits]
-
-        if ((ps.hi & ~hi_clear_mask & 0x00FFFFFFFFFFFFFFULL) != 0) {
-            return false;
-        }
-    }
-
-    // Check that all characters are valid
-    for (u8 i = 0; i < length; i++) {
-        const u8 sixbit = ps_sixbit_at(ps, i);
-        if (sixbit > 63) return false;  // Invalid sixbit
-    }
-
-    return true;
-}
-
 bool ps_is_valid_identifier(const PackedString ps) {
-    // Fast checks using flags
-    if (ps_starts_with_digit(ps)) return false;
+    // if (ps_length(ps) == 0) return false;
+    // No need to check the length,
+    // because if length is zero then
+    // first char is 0, and it's a digit so it returns false
 
-    const u8 len = ps_length(ps);
-    if (len == 0) return false;
-
-    // Check first character is valid (not digit, already checked by flag)
-    const u8 first_sixbit = ps.lo & 0x3F;
-    if (first_sixbit > 64) return false;
-
-    // Check remaining characters
-    for (u8 i = 1; i < len; i++) {
-        const u8 sixbit = ps_sixbit_at(ps, i);
-        if (sixbit > 64) return false;  // Invalid character
-    }
-
-    return true;
+    // Doesn't start with digit
+    return (ps.lo & 0x3F) > 9;
 }
 
 // ============================================================================
@@ -1029,7 +1005,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
 
     // Get flag descriptions
     const char* case_str = (flags & PACKED_FLAG_CASE_SENSITIVE) ? "preserve" : "lowercase";
-    const char* digit_str = (flags & PACKED_FLAG_STARTS_WITH_DIGIT) ? "start-digit" : "no-start-digit";
+    const char* digit_str = (flags & PACKED_FLAG_CONTAINS_DIGIT) ? "has-digit" : "no-digit";
     const char* special_str = (flags & PACKED_FLAG_CONTAINS_SPECIAL) ? "has-special" : "no-special";
 
     // Build flag string
@@ -1039,7 +1015,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
         if (flags & PACKED_FLAG_CASE_SENSITIVE) {
             fptr += snprintf(fptr, sizeof(flag_buf), "case ");
         }
-        if (flags & PACKED_FLAG_STARTS_WITH_DIGIT) {
+        if (flags & PACKED_FLAG_CONTAINS_DIGIT) {
             fptr += snprintf(fptr, sizeof(flag_buf) - (fptr - flag_buf), "%sdigit ",
                            fptr > flag_buf ? "| " : "");
         }
@@ -1203,12 +1179,12 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
         if (flags & PACKED_FLAG_CASE_SENSITIVE)
             ptr += sprintf(ptr, "CASE");
 
-        if (flags & PACKED_FLAG_STARTS_WITH_DIGIT) {
+        if (flags & PACKED_FLAG_CONTAINS_DIGIT) {
             if (flags & PACKED_FLAG_CASE_SENSITIVE) ptr += sprintf(ptr, "|");
             ptr += sprintf(ptr, "DIGIT");
         }
         if (flags & PACKED_FLAG_CONTAINS_SPECIAL) {
-            if (flags & (PACKED_FLAG_CASE_SENSITIVE | PACKED_FLAG_STARTS_WITH_DIGIT))
+            if (flags & (PACKED_FLAG_CASE_SENSITIVE | PACKED_FLAG_CONTAINS_DIGIT))
                 ptr += sprintf(ptr, "|");
 
             ptr += sprintf(ptr, "SPECIAL");
@@ -1242,7 +1218,7 @@ i32 psd_inspect(const PackedString ps, char* buffer) {
     // Build flag string compactly
     char flag_chars[4] = "---";
     if (flags & PACKED_FLAG_CASE_SENSITIVE) flag_chars[0] = 'C';
-    if (flags & PACKED_FLAG_STARTS_WITH_DIGIT) flag_chars[1] = 'D';
+    if (flags & PACKED_FLAG_CONTAINS_DIGIT) flag_chars[1] = 'D';
     if (flags & PACKED_FLAG_CONTAINS_SPECIAL) flag_chars[2] = 'S';
 
     const i32 length = snprintf(buffer, 64,
@@ -1253,39 +1229,41 @@ i32 psd_inspect(const PackedString ps, char* buffer) {
 }
 
 i32 psd_cstr(const PackedString ps, char* buffer) {
-    if (!ps_valid(ps)) {
-        // Return special marker for invalid strings
-        static const char* invalid_markers[] = {
-            "[INVALID:invalid]",
-            "[INVALID:toolong]",
-            "[INVALID:badchar]",
-            "[INVALID:corrupt]"
-        };
-        static const i32 errorLength = 18;
+    static const char
+        *marker_invalid  = "[INVALID:invalid]",
+        *marker_null     = "[INVALID:null]",
+        *marker_empty    = "[INVALID:empty]",
+        *marker_unpack   = "[INVALID:unpack]",
+        *marker_unknown  = "[INVALID:unknown]";
 
-        // Simple heuristic for different invalid cases
-        if (ps.lo == UINT64_MAX && ps.hi == UINT64_MAX) {
-            strcpy(buffer, invalid_markers[0]); // PACKED_STRING_INVALID
-            return errorLength;
+    const u8 len = ps_length(ps);
+
+    if (len > PACKED_STRING_MAX_LEN) {
+        if (len == PS_INVALID) {
+            strcpy(buffer, marker_invalid);
+            return -1;
         }
 
-        const u8 len = ps_length(ps);
-        if (len > PACKED_STRING_MAX_LEN) {
-            strcpy(buffer, invalid_markers[1]); // Too long
-            return errorLength;
+        if (len == PS_NULL) {
+            strcpy(buffer, marker_null);
+            return -1;
         }
 
-        // Try to unpack anyway, might show partial string
-        const bool result = ps_unpack(ps, buffer);
-        if (result) return len;
+        if (len == PS_EMPTY) {
+            strcpy(buffer, marker_empty);
+            return -1;
+        }
 
-        strcpy(buffer, invalid_markers[2]); // Bad character
-        return errorLength;
+        strcpy(buffer, marker_unknown);
+        return -1;
     }
 
-    // Valid string
-    ps_unpack(ps, buffer);
-    return ps_length(ps);
+    // Try to unpack
+    const i32 length = ps_unpack(ps, buffer);
+    if (length != -1) return length;
+
+    strcpy(buffer, marker_unpack);
+    return -1;
 }
 
 static __thread char debug_buffer[1024];

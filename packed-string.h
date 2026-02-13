@@ -46,17 +46,21 @@ typedef struct packed_string {
 
 
 // Error cases
-#define PS_INVALID 31
-#define PS_NULL 30
+#define PS_INVALID  31
+#define PS_NULL     30
+#define PS_EMPTY    29
+// You can define your own error state from 28-21 are free to use
 
 // Constants
-#define PACKED_STRING_MAX_LEN 20
-#define PACKED_STRING_ALPHABET "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$"
-#define PACKED_STRING_INVALID ((PackedString){.lo = UINT64_MAX, .hi = UINT64_MAX})
+#define PACKED_STRING_MAX_LEN   20
+#define PACKED_STRING_ALPHABET  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$"
+#define PACKED_STRING_INVALID   ((PackedString){.lo = 0, .hi = (u64)PS_INVALID   << 59})
+#define PACKED_STRING_NULL      ((PackedString){.lo = 0, .hi = (u64)PS_NULL      << 59})
+#define PACKED_STRING_EMPTY     ((PackedString){.lo = 0, .hi = (u64)PS_EMPTY     << 59})
 
 // Flag bit positions (in metadata byte)
 #define PACKED_FLAG_CASE_SENSITIVE      (1u << 0)   // Bit 0: 1=preserve case, 0=lowercase
-#define PACKED_FLAG_STARTS_WITH_DIGIT   (1u << 1)   // Bit 1: 1=first char is 0-9
+#define PACKED_FLAG_CONTAINS_DIGIT      (1u << 1)   // Bit 1: 1=contains 0-9
 #define PACKED_FLAG_CONTAINS_SPECIAL    (1u << 2)   // Bit 2: 1=contains '_' or '$'
 
 // ============================================================================
@@ -125,6 +129,14 @@ static inline PackedString ps_from(const u64 lo, const u64 hi) {
 PackedString ps_make(u64 lo, u64 hi, u8 length, u8 flags);
 
 /**
+ * Scan and fix flags of packed string.
+ *
+ * @param ps Packed string to scan
+ * @return Scanned and fixed packed string
+ */
+PackedString ps_scan(PackedString ps);
+
+/**
  * Pack a C string into PackedString (max 20 chars).
  * Smart flags detection.
  * 
@@ -148,9 +160,9 @@ PackedString ps_pack_ex(const char* str, u8 length, u8 flags);
  * 
  * @param ps Packed string to unpack
  * @param buffer Output buffer (must have at least PACKED_STRING_MAX_LEN+1 bytes)
- * @return false if ps is invalid else true (success)
+ * @return -1 if (ps is invalid) else length
  */
-bool ps_unpack(PackedString ps, char* buffer);
+i32 ps_unpack(PackedString ps, char* buffer);
 
 /**
  * Unpack exact length with specified flags (advanced use).
@@ -159,22 +171,32 @@ bool ps_unpack(PackedString ps, char* buffer);
  * @param buffer Output buffer (must have at least PACKED_STRING_MAX_LEN+1 bytes)
  * @param length String length (must be ≤ 20)
  * @param flags Combination of PACKED_FLAG_* constants
- * @return false if ps is invalid or length > 20
+ * @return -1 if (ps is invalid or length > 20) else length
  */
-bool ps_unpack_ex(PackedString ps, char* buffer, u8 length, u8 flags);
+i32 ps_unpack_ex(PackedString ps, char* buffer, u8 length, u8 flags);
 
 // ============================================================================
 // FLAGS CHECK O(1)
 // ============================================================================
 
 /**
- * Check if string starts with digit (using flag, O(1)).
+ * Check if string is case-sensitive (using flag, O(1)).
  *
  * @param ps Packed string
- * @return true if first character is 0-9
+ * @return true if case should be preserved
  */
-static inline bool ps_starts_with_digit(const PackedString ps) {
-    return (ps_flags(ps) & PACKED_FLAG_STARTS_WITH_DIGIT) != 0;
+static inline bool ps_is_case_sensitive(const PackedString ps) {
+    return (ps_flags(ps) & PACKED_FLAG_CASE_SENSITIVE) != 0;
+}
+
+/**
+ * Check if string contains digit (using flag, O(1)).
+ *
+ * @param ps Packed string
+ * @return true if contains character is 0-9
+ */
+static inline bool ps_contains_digit(const PackedString ps) {
+    return (ps_flags(ps) & PACKED_FLAG_CONTAINS_DIGIT) != 0;
 }
 
 /**
@@ -185,16 +207,6 @@ static inline bool ps_starts_with_digit(const PackedString ps) {
  */
 static inline bool ps_contains_special(const PackedString ps) {
     return (ps_flags(ps) & PACKED_FLAG_CONTAINS_SPECIAL) != 0;
-}
-
-/**
- * Check if string is case-sensitive (using flag, O(1)).
- *
- * @param ps Packed string
- * @return true if case should be preserved
- */
-static inline bool ps_is_case_sensitive(const PackedString ps) {
-    return (ps_flags(ps) & PACKED_FLAG_CASE_SENSITIVE) != 0;
 }
 
 // ============================================================================
@@ -490,22 +502,6 @@ static inline u32 ps_hash_for_table(const PackedString ps) {
  */
 bool ps_is_valid_identifier(PackedString ps);
 
-/**
- * Check if string contains digit(s) (scans if needed).
- * 
- * @param ps Packed string
- * @return true if contains digit 0-9
- */
-bool ps_has_digit(PackedString ps);
-
-/**
- * Validate packed string structure.
- * 
- * @param ps Packed string
- * @return true if internally consistent
- */
-bool ps_validate(PackedString ps);
-
 // ============================================================================
 // DEBUGGING & FORMATTING
 // ============================================================================
@@ -575,7 +571,7 @@ i32 psd_cstr(PackedString ps, char* buffer);
 
 /**
  * Warp debug functions with a temporary buffer.
- * Warning: this use a thread local buffer do not use it others than printing.
+ * Warning: this use a thread local buffer do not use it other than printing.
  *
  * @param func Debug function to call
  * @param ps Packed string
