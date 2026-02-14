@@ -1098,8 +1098,7 @@ i32 psd_cstr(const PackedString ps, char* buffer) {
 
 static __thread char debug_buffer[1024];
 
-char* psd_warper(void (*func)(PackedString ps, char* buffer),
-    const PackedString ps) {
+char* psd_warper(const PsDebugFunc func, const PackedString ps) {
     func(ps, debug_buffer);
     return debug_buffer;
 }

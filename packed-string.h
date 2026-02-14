@@ -1,3 +1,13 @@
+/**
+ * @file packed-string.h
+ * PackedString - pretty fast compact string with 20 chars stored in 128-bit
+ *
+ * API prefix: 'ps_'
+ * API debug prefix: 'psd_'
+ *
+ * Functions and time
+ */
+
 #ifndef PACKED_STRING_H
 #define PACKED_STRING_H
 
@@ -36,6 +46,8 @@ typedef struct packed_string {
 
 typedef struct packed_string packed;    // Shorthand for PackedString
 typedef struct packed_string ps_t;      // Shorthand for PackedString
+
+typedef i32 (*PsDebugFunc)(PackedString ps, char* buffer);
 
 // Error cases
 #define PS_INVALID  31
@@ -684,7 +696,7 @@ i32 psd_cstr(PackedString ps, char* buffer);
  * @param ps Packed string
  * @return C string length including null
  */
-char* psd_warper(void (*func)(PackedString ps, char* buffer), PackedString ps);
+char* psd_warper(PsDebugFunc func, PackedString ps);
 
 // ============================================================================
 // COMPILE-TIME HELPERS
