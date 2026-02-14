@@ -1,22 +1,12 @@
 #ifndef PACKED_STRING_H
 #define PACKED_STRING_H
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "encoding.h"
+#include "types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-typedef int8_t i8;
-typedef int16_t i16;
-typedef int32_t i32;
-typedef int64_t i64;
 
 // ============================================================================
 // PUBLIC API - PackedString Type and Constants
@@ -40,10 +30,12 @@ typedef int64_t i64;
  * Flags: case_sensitive | starts_with_digit | contains_special
  */
 typedef struct packed_string {
-    u64 lo;  // Lower 64 bits: chars 0-9 (60 bits) + 4 bits
-    u64 hi;  // Upper 64 bits: chars 11-19 (60 bits) + 8 bits metadata
+    u64 lo; // Lower 64 bits: chars 0-9 (60 bits) + 4 bits
+    u64 hi; // Upper 64 bits: chars 11-19 (60 bits) + 8 bits metadata
 } PackedString;
 
+typedef struct packed_string packed;    // Shorthand for PackedString
+typedef struct packed_string ps_t;      // Shorthand for PackedString
 
 // Error cases
 #define PS_INVALID  31
@@ -73,7 +65,12 @@ typedef struct packed_string {
  * @param c Character to be converted
  * @return Sixbit Character or UINT8_MAX if not valid
  */
-u8 ps_char(char c);
+static inline u8 ps_char(const char c)  {
+    if (c == '0') return 0;
+    const u8 r = PS_CHAR_TO_SIXBIT[(u8)c];
+    if (r == 0) return UINT8_MAX;
+    return r;
+}
 
 /**
  * Convert sixbit character to ASCII character .
@@ -81,10 +78,16 @@ u8 ps_char(char c);
  * @param six Sixbit character to be converted
  * @return ASCII Character or '?' if not valid
  */
-char ps_six(u8 six);
+static inline char ps_six(const u8 six) {
+    if (six >= 64) return '?';
+    return PS_SIXBIT_TO_CHAR[six];
+}
 
 /** Check if char in packed string alphabet */
-bool ps_alphabet(char c);
+static inline bool ps_alphabet(const char c) {
+    if (c == '0') return true;
+    return PS_CHAR_TO_SIXBIT[(u8)c] != 0;
+}
 
 // ============================================================================
 // CORE OPERATIONS
@@ -121,6 +124,16 @@ static inline bool ps_valid(const PackedString ps) {
 }
 
 /**
+ * Check if packed string is empty.
+ *
+ * @param ps Packed string
+ * @return true if packed string is empty
+ */
+static inline bool ps_is_empty(const PackedString ps) {
+    return ps_length(ps) == 0;
+}
+
+/**
  * Make an empty packed string
  *
  * @return Empty packed string
@@ -149,7 +162,12 @@ static inline PackedString ps_from(const u64 lo, const u64 hi) {
  * @param flags Flags of string
  * @return Packed string
  */
-PackedString ps_make(u64 lo, u64 hi, u8 length, u8 flags);
+static inline PackedString ps_make(const u64 lo, const u64 hi,
+    u8 const length, u8 const flags) {
+    const u8 meta = length << 3 | flags;
+    const u64 h = hi & 0x00FFFFFFFFFFFFFFULL | (u64)meta << 56;
+    return (PackedString){.lo = lo, .hi = h};
+}
 
 /**
  * Scan and fix flags of packed string.
