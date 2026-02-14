@@ -1069,17 +1069,17 @@ i32 psd_cstr(const PackedString ps, char* buffer) {
     const u8 len = ps_length(ps);
 
     if (len > PACKED_STRING_MAX_LEN) {
-        if (len == PS_INVALID) {
+        if (len == PSC_INVALID) {
             strcpy(buffer, marker_invalid);
             return -1;
         }
 
-        if (len == PS_NULL) {
+        if (len == PSC_NULL) {
             strcpy(buffer, marker_null);
             return -1;
         }
 
-        if (len == PS_EMPTY) {
+        if (len == PSC_EMPTY) {
             strcpy(buffer, marker_empty);
             return -1;
         }

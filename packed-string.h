@@ -4,8 +4,72 @@
  *
  * API prefix: 'ps_'
  * API debug prefix: 'psd_'
+ * 
+ * Type name: PackedString
+ *  - Shorthands: packed, ps_t
  *
- * Functions and time
+ * Functions and time complexity:
+ * | Id   | Function                  | Complexity | 100x call time |
+ * |------|---------------------------|------------|----------------|
+ * | 1    | char                      | O(1)       | ?              |
+ * | 2    | six                       | O(1)       | ?              |
+ * | 3    | alphabet                  | O(1)       | ?              |
+ * | 4    | length                    | O(1)       | ?              |
+ * | 5    | flags                     | O(1)       | ?              |
+ * | 6    | valid                     | O(1)       | ?              |
+ * | 7    | is_empty                  | O(1)       | ?              |
+ * | 8    | empty                     | O(1)       | ?              |
+ * | 9    | form                      | O(1)       | ?              |
+ * | 10   | make                      | O(1)       | ?              |
+ * | 11   | pack                      | O(N)       | ?              |
+ * | 12   | unpack                    | O(N)       | ?              |
+ * | 13   | pack_ex                   | O(N)       | ?              |
+ * | 14   | unpack_ex                 | O(N)       | ?              |
+ * | 15   | scan                      | O(N)       | ?              |
+ * | 16   | is_case_sensitive         | O(1)       | ?              |
+ * | 17   | contains_digit            | O(1)       | ?              |
+ * | 18   | contains_special          | O(1)       | ?              |
+ * | 19   | set                       | O(1)       | ?              |
+ * | 20   | at                        | O(1)       | ?              |
+ * | 21   | first                     | O(1)       | ?              |
+ * | 22   | last                      | O(1)       | ?              |
+ * | 23   | equal                     | O(1)       | ?              |
+ * | 24   | equal_nometa              | O(1)       | ?              |
+ * | 25   | equal_nocase              | O(N)       | ?              |
+ * | 26   | packed_compare            | O(1)       | ?              |
+ * | 27   | compare                   | O(1)       | ?              |
+ * | 28   | starts_with               | O(1)       | ?              |
+ * | 29   | ends_with                 | O(1)       | ?              |
+ * | 30   | starts_with_at            | O(1)       | ?              |
+ * | 31   | ends_with_at              | O(1)       | ?              |
+ * | 32   | skip                      | O(1)       | ?              |
+ * | 33   | trunc                     | O(1)       | ?              |
+ * | 34   | substring                 | O(1)       | ?              |
+ * | 35   | concat                    | O(1)       | ?              |
+ * | 36   | to_lower                  | O(N)       | ?              |
+ * | 37   | to_upper                  | O(N)       | ?              |
+ * | 38   | pad_left                  | O(N)       | ?              |
+ * | 39   | pad_right                 | O(N)       | ?              |
+ * | 40   | pad_center                | O(N)       | ?              |
+ * | 41   | find_six                  | O(1)       | ?              |
+ * | 42   | find_from_six             | O(1)       | ?              |
+ * | 43   | find_last_six             | O(1)       | ?              |
+ * | 44   | contains_six              | O(1)       | ?              |
+ * | 45   | contains                  | O(N)       | ?              |
+ * | 46   | hash32                    | O(1)       | ?              |
+ * | 47   | hash64                    | O(1)       | ?              |
+ * | 48   | table_hash                | O(1)       | ?              |
+ * | 49   | lock                      | O(1)       | ?              |
+ * | 50   | unlock                    | O(1)       | ?              |
+ * | 51   | hex                       | O(1)       | ?              |
+ * | 52   | binary                    | O(?)       | ?              |
+ * | 53   | encoding_binary           | O(?)       | ?              |
+ * | 54   | info                      | O(?)       | ?              |
+ * | 55   | visualize_bits            | O(?)       | ?              |
+ * | 56   | psd_inspect               | O(?)       | ?              |
+ * | 57   | psd_cstr                  | O(?)       | ?              |
+ * | 58   | psd_warper                | O(?)       | ?              |
+ * 
  */
 
 #ifndef PACKED_STRING_H
@@ -50,17 +114,17 @@ typedef struct packed_string ps_t;      // Shorthand for PackedString
 typedef i32 (*PsDebugFunc)(PackedString ps, char* buffer);
 
 // Error cases
-#define PS_INVALID  31
-#define PS_NULL     30
-#define PS_EMPTY    29
+#define PSC_INVALID  31
+#define PSC_NULL     30
+#define PSC_EMPTY    29
 // You can define your own error state from 28-21 are free to use
 
 // Constants
 #define PACKED_STRING_MAX_LEN   20
 #define PACKED_STRING_ALPHABET  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$"
-#define PACKED_STRING_INVALID   ((PackedString){.lo = 0, .hi = (u64)PS_INVALID   << 59})
-#define PACKED_STRING_NULL      ((PackedString){.lo = 0, .hi = (u64)PS_NULL      << 59})
-#define PACKED_STRING_EMPTY     ((PackedString){.lo = 0, .hi = (u64)PS_EMPTY     << 59})
+#define PACKED_STRING_INVALID   ((PackedString){.lo = 0, .hi = (u64)PSC_INVALID << 59})
+#define PACKED_STRING_NULL      ((PackedString){.lo = 0, .hi = (u64)PSC_NULL    << 59})
+#define PACKED_STRING_EMPTY     ((PackedString){.lo = 0, .hi = (u64)PSC_EMPTY   << 59})
 
 // Flag bit positions (in metadata byte)
 #define PACKED_FLAG_CASE_SENSITIVE      (1u << 0)   // Bit 0: 1=preserve case, 0=lowercase
