@@ -9,7 +9,7 @@
  *  - Shorthands: packed, ps_t
  *
  * Functions and time complexity:
- * | Id   | Function                  | Complexity | 100x call time |
+ * | ID   | Function                  | Complexity | 100x call time |
  * |------|---------------------------|------------|----------------|
  * | 1    | char                      | O(1)       | ?              |
  * | 2    | six                       | O(1)       | ?              |
