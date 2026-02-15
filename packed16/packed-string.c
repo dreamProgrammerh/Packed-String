@@ -501,6 +501,11 @@ PackedString ps_to_upper(const PackedString ps) {
 PackedString ps_pad_left(const PackedString ps, const u8 sixbit, const u8 length) {
     const u8 len = ps_length(ps);
     if (len >= length) return ps;
+    u8 flags = ps_flags(ps);
+
+    if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
     const u8 pad_len = length - len;
     u64 pad_lo, pad_hi, lo = ps.lo, hi = ps.hi;
@@ -511,13 +516,18 @@ PackedString ps_pad_left(const PackedString ps, const u8 sixbit, const u8 length
     lo |= pad_lo;
     hi |= pad_hi;
 
-    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    ps_insert_metadata(&hi, ps_pack_metadata(length, flags));
     return (PackedString){ .lo=lo, .hi=hi };
 }
 
 PackedString ps_pad_right(const PackedString ps, const u8 sixbit, const u8 length) {
     const u8 len = ps_length(ps);
     if (len >= length) return ps;
+    u8 flags = ps_flags(ps);
+
+    if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
     const u8 pad_len = length - len;
     u64 pad_lo, pad_hi, lo = ps.lo, hi = ps.hi;
@@ -528,13 +538,18 @@ PackedString ps_pad_right(const PackedString ps, const u8 sixbit, const u8 lengt
     lo |= pad_lo;
     hi |= pad_hi;
 
-    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    ps_insert_metadata(&hi, ps_pack_metadata(length, flags));
     return (PackedString){ .lo=lo, .hi=hi };
 }
 
 PackedString ps_pad_center(const PackedString ps, const u8 sixbit, const u8 length) {
     const u8 len = ps_length(ps);
     if (len >= length) return ps;
+    u8 flags = ps_flags(ps);
+
+    if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit <= 9) flags |= PACKED_FLAG_CONTAINS_DIGIT;
+    else if (sixbit == 62 || sixbit == 63) flags |= PACKED_FLAG_CONTAINS_SPECIAL;
 
     const u8 pad_len = length - len;
     const u8 padl_len = pad_len / 2;
@@ -550,7 +565,7 @@ PackedString ps_pad_center(const PackedString ps, const u8 sixbit, const u8 leng
     lo |= padl_lo | padr_lo;
     hi |= padl_hi | padr_hi;
 
-    ps_insert_metadata(&hi, ps_pack_metadata(length, 0));
+    ps_insert_metadata(&hi, ps_pack_metadata(length, flags));
     return (PackedString){ .lo=lo, .hi=hi };
 }
 
@@ -812,11 +827,10 @@ i32 psd_encoding_binary(const PackedString ps, char* buffer) {
 
     // Print metadata (8 bits in hi[56:63])
     const u8 metadata = ps_extract_metadata(ps.hi);
-    for (i8 bit = 7; bit >= 0; bit--) {
-        *ptr++ = BIT(metadata >> bit);
-        if (bit == 5) *ptr++ = ':';  // Mark length/flags boundary
-    }
 
+    for (i8 bit = 2; bit >= 0; bit--) *ptr++ = BIT(metadata >> bit);
+    *ptr++ = ':';  // Mark length/flags boundary
+    for (i8 bit = 7; bit >= 3; bit--) *ptr++ = BIT(metadata >> bit);
 
     *ptr = '\0';
     return (i32)((size_t)ptr - (size_t)buffer);
@@ -840,7 +854,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
     const char* special_str = (flags & PACKED_FLAG_CONTAINS_SPECIAL) ? "has-special" : "no-special";
 
     // Build flag string
-    char flag_buf[64];
+    char flag_buf[64] = "";
     if (flags) {
         char* fptr = flag_buf;
         if (flags & PACKED_FLAG_CASE_SENSITIVE) {
@@ -861,7 +875,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
     }
 
     // Get character breakdown
-    char chars_buf[128];
+    char chars_buf[128]  = "";
     for (u8 i = 0; i < length; i++) {
         const u8 sixbit = ps_at(ps, i);
         const char c = ps_six(sixbit);
@@ -874,7 +888,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
     }
 
     // Get bit layout
-    char layout_buf[256];
+    char layout_buf[256]  = "";
     snprintf(layout_buf, sizeof(layout_buf),
              "lo[0:59]=chars0-9 lo[60:63]+hi[0:1]=char10 "
              "hi[2:55]=chars11-19 hi[56:63]=metadata");
@@ -896,7 +910,7 @@ i32 psd_info(const PackedString ps, char* buffer) {
              "}",
              str_buf,
              length,
-             metadata, length & 0x1F, flags >> 5,
+             metadata, length, flags,
              flag_buf,
              chars_buf,
              layout_buf,
