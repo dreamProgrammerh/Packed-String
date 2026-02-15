@@ -770,7 +770,7 @@ char* psd_warper(PsDebugFunc func, PackedString ps);
  * Compile-time string packing for constants.
  * Example: PackedString str = PS_LITERAL("hello");
  */
-#define PS_LITERAL(str) (ps_pack_ex(str, sizeof(str) - 1, PACKED_FLAG_CASE_SENSITIVE))
+#define PS_LITERAL(str) (ps_pack(str))
 
 /**
  * Compile-time length check.

@@ -33,7 +33,8 @@ PackedString ps_scan(const PackedString ps) {
     }
 
     // Process characters 11-19 in hi
-    for (u8 i = 0, l = len - 11; i < l; i++) {
+    const u8 hi_len = len < 11 ? 0 : len - 11;
+    for (u8 i = 0; i < hi_len; i++) {
         const u8 sixbit = ps_get_hi(ps.hi, i);
 
         if (36 <= sixbit && sixbit <= 61) flags |= PACKED_FLAG_CONTAINS_DIGIT;
