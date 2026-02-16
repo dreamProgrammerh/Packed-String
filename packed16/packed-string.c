@@ -849,46 +849,41 @@ i32 psd_info(const PackedString ps, char* buffer) {
     const u8 metadata = ps_extract_metadata(ps.hi);
 
     // Get flag descriptions
-    const char* case_str = (flags & PACKED_FLAG_CASE_SENSITIVE) ? "preserve" : "lowercase";
-    const char* digit_str = (flags & PACKED_FLAG_CONTAINS_DIGIT) ? "has-digit" : "no-digit";
-    const char* special_str = (flags & PACKED_FLAG_CONTAINS_SPECIAL) ? "has-special" : "no-special";
+    const bool flag_case = flags & PACKED_FLAG_CASE_SENSITIVE;
+    const bool flag_digit = flags & PACKED_FLAG_CONTAINS_DIGIT;
+    const bool flag_special = flags & PACKED_FLAG_CONTAINS_SPECIAL;
 
     // Build flag string
-    char flag_buf[64] = "";
+    char flag_buf[32] = "none";
     if (flags) {
         char* fptr = flag_buf;
-        if (flags & PACKED_FLAG_CASE_SENSITIVE) {
-            fptr += snprintf(fptr, sizeof(flag_buf), "case ");
+        if (flag_case) {
+            fptr += snprintf(fptr, sizeof(flag_buf), "case");
         }
-        if (flags & PACKED_FLAG_CONTAINS_DIGIT) {
-            fptr += snprintf(fptr, sizeof(flag_buf) - (fptr - flag_buf), "%sdigit ",
-                           fptr > flag_buf ? "| " : "");
+        if (flag_digit) {
+            fptr += snprintf(fptr, sizeof(flag_buf) - (fptr - flag_buf),
+                "%sdigit", fptr > flag_buf ? " | " : "");
         }
-        if (flags & PACKED_FLAG_CONTAINS_SPECIAL) {
-            fptr += snprintf(fptr, sizeof(flag_buf) - (fptr - flag_buf), "%sspecial ",
-                           fptr > flag_buf ? "| " : "");
+        if (flag_special) {
+            fptr += snprintf(fptr, sizeof(flag_buf) - (fptr - flag_buf),
+                "%sspecial", fptr > flag_buf ? " | " : "");
         }
-        // Remove trailing space
-        if (fptr > flag_buf) *(fptr - 1) = '\0';
-    } else {
-        strcpy(flag_buf, "none");
+
+        *fptr = '\0';
     }
 
     // Get character breakdown
-    char chars_buf[128]  = "";
+    char chars_buf[128] = "[empty]";
+    u32 chars_len = 0;
     for (u8 i = 0; i < length; i++) {
         const u8 sixbit = ps_at(ps, i);
         const char c = ps_six(sixbit);
-        snprintf(chars_buf + strlen(chars_buf),
-                 sizeof(chars_buf) - strlen(chars_buf),
+        chars_len += snprintf(chars_buf + chars_len, sizeof(chars_buf) - chars_len,
                  "%c(%02u) ", c, sixbit);
-    }
-    if (length == 0) {
-        strcpy(chars_buf, "[empty]");
     }
 
     // Get bit layout
-    char layout_buf[256]  = "";
+    char layout_buf[128] = "";
     snprintf(layout_buf, sizeof(layout_buf),
              "lo[0:59]=chars0-9 lo[60:63]+hi[0:1]=char10 "
              "hi[2:55]=chars11-19 hi[56:63]=metadata");
@@ -916,9 +911,9 @@ i32 psd_info(const PackedString ps, char* buffer) {
              layout_buf,
              ps_valid(ps) ? "yes" : "NO (invalid)",
              ps.hi, ps.lo,
-             case_str,
-             digit_str,
-             special_str);
+             flag_case ? "preserve" : "lowercase",
+             flag_digit ? "has-digit" : "no-digit",
+             flag_special ? "has-special" : "no-special");
 
     return len;
 }
@@ -954,7 +949,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " code:");
     for (u8 i = 0; i < 10; i++) {
         if (i < len) {
-            const u8 sixbit = (ps.lo >> (i * 6)) & 0x3F;
+            const u8 sixbit = ps_get_lo(ps.lo, i);
             ptr += sprintf(ptr, " %02X", sixbit);
         } else {
             ptr += sprintf(ptr, " --");
@@ -964,7 +959,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     // Char10 (split)
     ptr += sprintf(ptr, " | ");
     if (len > 10) {
-        const u8 char10 = ((ps.lo >> 60) & 0xF) | ((ps.hi & 0x3) << 4);
+        const u8 char10 = ps_get_mid(ps.lo, ps.hi);
         ptr += sprintf(ptr, "%02X", char10);
     } else {
         ptr += sprintf(ptr, "--");
@@ -974,7 +969,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     ptr += sprintf(ptr, " |");
     for (u8 i = 0; i < 9; i++) {
         if (i + 11 < len) {
-            const u8 sixbit = (ps.hi >> (i * 6 + 2)) & 0x3F;
+            const u8 sixbit = ps_get_hi(ps.hi, i);
             ptr += sprintf(ptr, " %02X", sixbit);
         } else {
             ptr += sprintf(ptr, " --");
@@ -982,8 +977,7 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     }
 
     // Metadata
-    ptr += sprintf(ptr, " | %02X %02X\n",
-        length, flags);
+    ptr += sprintf(ptr, " | %02X %02X\n", length, flags);
 
     // Second line: actual characters
     ptr += sprintf(ptr, " char:");
@@ -1021,9 +1015,9 @@ i32 psd_visualize_bits(const PackedString ps, char* buffer) {
     // Metadata breakdown
     if (flags) {
         ptr += sprintf(ptr, ", flags=");
-        if (flags & PACKED_FLAG_CASE_SENSITIVE)
+        if (flags & PACKED_FLAG_CASE_SENSITIVE) {
             ptr += sprintf(ptr, "CASE");
-
+        }
         if (flags & PACKED_FLAG_CONTAINS_DIGIT) {
             if (flags & PACKED_FLAG_CASE_SENSITIVE) ptr += sprintf(ptr, "|");
             ptr += sprintf(ptr, "DIGIT");
@@ -1049,8 +1043,17 @@ i32 psd_inspect(const PackedString ps, char* buffer) {
     if (!buffer) return -1;
 
     if (!ps_valid(ps)) {
-        const i32 len = snprintf(buffer, 32,
-            "PackedString<INVALID>");
+        const u8 length = ps_length(ps);
+        u32 len = 0;
+        if (length == PSC_INVALID) {
+            len = snprintf(buffer, 32, "PackedString<INVALID>");
+
+        } else if (length == PSC_NULL) {
+            len = snprintf(buffer, 32, "PackedString<NULL>");
+
+        } else if (length == PSC_EMPTY) {
+            len = snprintf(buffer, 32, "PackedString<EMPTY>");
+        }
         return len;
     }
 
